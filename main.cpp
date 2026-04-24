@@ -8,12 +8,11 @@
 #include <atomic>
 #include <thread>
 
-#include "imgui/imgui.h"
-#include "imgui/imgui_impl_dx11.h"
-#include "imgui/imgui_impl_win32.h"
+//#include "imgui/imgui.h"
+//#include "imgui/imgui_impl_dx11.h"
+//#include "imgui/imgui_impl_win32.h"
 
-#include "haxgui.h"
-#include "haxgui_impl_dx11.h"
+#include "hax_gui_dx11.h"
 
 #include "resource.h"
 
@@ -32,102 +31,18 @@ void CreateRenderTarget();
 void CleanupRenderTarget();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-namespace HaxGui = Hax::Gui;
+using namespace Hax;
 
-struct DummyState
-{
-    Hax::Color Color = 0x00FF00FF;
-};
+//extern void ShowCheatWindow(Handle hModule);
 
-static void RunGraphicTest() 
-{
-    static HaxGui::Font* mainFont;
-    static HaxGui::Texture2D sampleImage;
-    static bool s_Flag;
-    if (!s_Flag)
-    {
-        s_Flag = true;
-
-        mainFont = &Hax::Gui::LoadFontFromMemory(Hax::Gui::GetResourceData((Hax::Handle)::GetModuleHandle(NULL), IDR_FNT5, L"FNT"));
-        sampleImage = Hax::Gui::LoadImageFromMemory(Hax::Gui::GetResourceData((Hax::Handle)::GetModuleHandle(NULL), IDR_JPG1, L"JPG"));
-    }
-
-
-    HaxGui::DrawLine({500.f, 500.f}, {600.f, 500.f}, {.Th = 0.9f, .FillColor = 0x000000ff});
-    HaxGui::DrawLine({500.f, 600.5f}, {600.f, 600.5f}, {.Th = 0.5f, .FillColor = Hax::Color::Black});
-    HaxGui::DrawRect({500.f, 700.f}, {600.f, 700.9f}, {.FillColor = Hax::Color::Black});
-
-    Hax::Vector2 p(50, 50); // Начальная точка отрисовки
-    float stepY = 120.0f;
-    float stepX = 220.0f;
-
-    // --- 1. Прямоугольники (Rectangles) ---
-    // Обычный с обводкой
-    HaxGui::DrawRect(p + Hax::Vector2(180, 80), p, { Hax::Color::Blue, {10, 10, 10, 10}, 2.0f, Hax::Color::White });
-
-    // Только обводка (прозрачный внутри)
-    HaxGui::DrawRect(p + Hax::Vector2(stepX, 0), p + Hax::Vector2(stepX + 180, 80), 
-        { Hax::Color(0,0,0,0), {20, 5, 20, 5}, 3.0f, Hax::Color::Red });
-
-    // Полностью скругленный (Capsule)
-    HaxGui::DrawRect(p + Hax::Vector2(stepX * 2, 0), p + Hax::Vector2(stepX * 2 + 180, 80), 
-        { Hax::Color::Green, {40, 40, 40, 40}, 0.0f });
-
-    p.Y += stepY;
-
-    // --- 2. Эллипсы и Круги (Ellipses & Circles) ---
-    // Круг с толстой обводкой
-    HaxGui::DrawCircle(p + Hax::Vector2(40, 40), 40.0f, { Hax::Color::Yellow, 5.0f, Hax::Color::Black });
-
-    // Эллипс полупрозрачный
-    HaxGui::DrawEllipse(p + Hax::Vector2(stepX + 90, 40), Hax::Vector2(80, 40), 
-        { Hax::Color(255, 165, 0, 128), 2.0f, Hax::Color::White });
-
-    p.Y += stepY;
-
-    // --- 3. Треугольники и Линии (Triangles & Lines) ---
-    // Треугольник с заливкой
-    HaxGui::DrawTriangle(p + Hax::Vector2(0, 80), p + Hax::Vector2(90, 0), p + Hax::Vector2(180, 80), 
-        { Hax::Color::Cyan, 2.0f, Hax::Color::Green });
-
-    // Линии разной толщины
-    HaxGui::DrawLine(p + Hax::Vector2(stepX, 20), p + Hax::Vector2(stepX + 150, 60), { 1.0f, Hax::Color::White });
-    HaxGui::DrawLine(p + Hax::Vector2(stepX, 40), p + Hax::Vector2(stepX + 150, 80), { 8.0f, Hax::Color(255, 0, 255, 180) });
-
-    p.Y += stepY;
-
-    // --- 4. Изображения (Images) ---
-    // Картинка с сильным скруглением углов
-    HaxGui::DrawImage(sampleImage, p, p + Hax::Vector2(180, 100), { Hax::Color::White, 30.0f });
-
-    // Картинка "вписанная" в круг (используем R как половину размера)
-    HaxGui::DrawImage(sampleImage, p + Hax::Vector2(stepX, 0), p + Hax::Vector2(stepX + 100, 100), 
-        { .R = 50.0f });
-
-    p.Y += stepY;
-
-    // --- 5. Текст и Глифы (Text & Glyphs) ---
-    // Одиночный глиф большого размера
-    HaxGui::DrawGlyph(*mainFont, u'A', p, 80.0f, { Hax::Color::White });
-
-    // Текст с разным интервалом
-    HaxGui::DrawTexto(*mainFont, L"Hello MSDF!", p + Hax::Vector2(100, 20), 32.0f, { Hax::Color::Yellow, 1.2f });
-
-    // Полупрозрачный текст поверх всего
-    HaxGui::DrawTexto(*mainFont, L"Overlay Text", p +Hax:: Vector2(100, 60), 24.0f, { Hax::Color(255, 255, 255, 100) });
-}
-
+constexpr int kTests = 100;
 static void RenderThread(HWND hwnd)
 {
     static float s_FPS = 0.f;
 
     CreateDeviceD3D(hwnd);
 
-    Hax::Gui::CreateContext((Hax::Handle)hwnd);
-    Hax::Gui::DirectX11_Init(g_pd3dDevice);
-
-    Hax::Gui::CreateLayer(L"Background", -1);
-    Hax::Gui::CreateLayer(L"Foreground", 1);
+    Gui::Initialize((Hax::Handle)hwnd, g_pd3dDevice);
 
     while (g_Running)
     {
@@ -139,16 +54,15 @@ static void RenderThread(HWND hwnd)
             CreateRenderTarget();
         }
 
-        Hax::LinearColor bg(0xF5F5F5FF);
+        Gui::LinearColor bg(0xF5F5F5FF);
         g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
         g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, &bg.R);
 
         Hax::Gui::BeginFrame();
         Hax::Gui::ShowDemoWindow();
-        //RunGraphicTest();
         Hax::Gui::EndFrame();
 
-        g_pSwapChain->Present(0, 0);
+        g_pSwapChain->Present(1, 0);
     }
 
     printf("FPS: %f\n", Hax::Gui::GetFramerate());
@@ -156,68 +70,68 @@ static void RenderThread(HWND hwnd)
     void* iter = nullptr;
     while (Hax::Allocator* alloc = Hax::Gui::IterAllocators(iter))
     {
-        printf("%s | total: %zu, max: %zu\n", alloc->Name(), alloc->TotalUsage(), alloc->PeakUsage());
+        printf("%s | total: %zu, max: %zu\n", alloc->Name, alloc->TotalAllocated, alloc->MaxAllocated);
     }
 
-    Hax::Gui::DestroyContext();
-
-
+    Hax::Gui::Shutdown();
 
     CleanupDeviceD3D();
 }
 
-static void RenderThreadImGui(HWND hwnd)
-{
-    CreateDeviceD3D(hwnd);
-
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
-
-    ImGui_ImplWin32_Init(hwnd);
-    ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
-    //ImGui::GetStyle().AntiAliasedFill = false;
-    //ImGui::GetStyle().AntiAliasedLines = false;
-
-    while (g_Running)
-    {
-        if (g_ResizeWidth != 0 && g_ResizeHeight != 0)
-        {
-            CleanupRenderTarget();
-            g_pSwapChain->ResizeBuffers(0, g_ResizeWidth, g_ResizeHeight, DXGI_FORMAT_UNKNOWN, 0);
-            g_ResizeWidth = g_ResizeHeight = 0;
-            CreateRenderTarget();
-        }
-
-        ImGui_ImplDX11_NewFrame();
-        ImGui_ImplWin32_NewFrame();
-        ImGui::NewFrame();
-
-        //g_FPS = ImGui::GetIO().Framerate;
-
-        ImGui::ShowDemoWindow();
-
-        ImGui::Render();
-
-        float clear_color[4] = { 0.95f, 0.95f, 0.95f, 1.00f };
-        g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
-        g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clear_color);
-        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-
-        g_pSwapChain->Present(1, 0);
-    }
-
-    printf("%f\n", ImGui::GetIO().Framerate);
-
-    ImGui_ImplDX11_Shutdown();
-    ImGui_ImplWin32_Shutdown();
-    ImGui::DestroyContext();
-
-
-    CleanupDeviceD3D();
-}
+//static void RenderThreadImGui(HWND hwnd)
+//{
+//    CreateDeviceD3D(hwnd);
+//
+//    IMGUI_CHECKVERSION();
+//    ImGui::CreateContext();
+//    ImGuiIO& io = ImGui::GetIO(); (void)io;
+//    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+//    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+//
+//    ImGui_ImplWin32_Init(hwnd);
+//    ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
+//    ImGui::GetStyle().AntiAliasedFill = false;
+//    ImGui::GetStyle().AntiAliasedLines = false;
+//
+//    while (g_Running)
+//    {
+//        if (g_ResizeWidth != 0 && g_ResizeHeight != 0)
+//        {
+//            CleanupRenderTarget();
+//            g_pSwapChain->ResizeBuffers(0, g_ResizeWidth, g_ResizeHeight, DXGI_FORMAT_UNKNOWN, 0);
+//            g_ResizeWidth = g_ResizeHeight = 0;
+//            CreateRenderTarget();
+//        }
+//
+//        ImGui_ImplDX11_NewFrame();
+//        ImGui_ImplWin32_NewFrame();
+//        ImGui::NewFrame();
+//
+//        //g_FPS = ImGui::GetIO().Framerate;
+//
+//        //for (int i = 0; i < 10000; ++i) { ImGui::GetForegroundDrawList()->AddTriangleFilled({50.f, 50.f}, {20.f, 100.f}, {80.f, 70.f}, 0xff0000ff); }
+//
+//        ImGui::ShowDemoWindow();
+//
+//        ImGui::Render();
+//
+//        float clear_color[4] = { 0.95f, 0.95f, 0.95f, 1.00f };
+//        g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
+//        g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clear_color);
+//        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+//
+//        g_pSwapChain->Present(0, 0);
+//    }
+//
+//    printf("%f\n", ImGui::GetIO().Framerate);
+//
+//    ImGui_ImplDX11_Shutdown();
+//    ImGui_ImplWin32_Shutdown();
+//    ImGui::DestroyContext();
+//
+//
+//    CleanupDeviceD3D();
+//}
 
 extern size_t g_TotalAllocated;
 extern size_t g_MaxAllocated;
@@ -258,12 +172,12 @@ int main()
     ::DestroyWindow(hwnd);
     ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
 
-    if (g_MaxAllocated > 1024LL * 1024 * 1024) printf("Max memory used: %f gb\n", g_MaxAllocated / (1024.f * 1024.f * 1024.f));
+    /*if (g_MaxAllocated > 1024LL * 1024 * 1024) printf("Max memory used: %f gb\n", g_MaxAllocated / (1024.f * 1024.f * 1024.f));
     else if (g_MaxAllocated > 1024LL * 1024) printf("Max memory used: %f mb\n", g_MaxAllocated / (1024.f * 1024.f));
     else if (g_MaxAllocated > 1024LL) printf("Max memory used: %f kb\n", g_MaxAllocated / 1024.f);
     else printf("Max memory used: %zu b\n", g_MaxAllocated);
 
-    printf("Memory leaked: %zu bytes\n", g_TotalAllocated);
+    printf("Memory leaked: %zu bytes\n", g_TotalAllocated);*/
 
     return 0;
 }
@@ -321,14 +235,14 @@ void CleanupRenderTarget()
     if (g_mainRenderTargetView) { g_mainRenderTargetView->Release(); g_mainRenderTargetView = nullptr; }
 }
 
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+//extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     if (Hax::Gui::HandleWndMsg((void*)hWnd, msg, wParam, lParam))
         return 1;
 
-    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
-        return TRUE;
+    /*if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
+        return TRUE;*/
 
     switch (msg)
     {

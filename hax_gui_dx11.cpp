@@ -1,6 +1,5 @@
-#include "haxgui_impl_dx11.h"
-
-#include "haxgui_internal.h"
+#define HAXGUI_INCLUDE_INTERNAL
+#include "hax_gui_dx11.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -21,6 +20,12 @@ namespace Hax::Gui
         void                    Render() override;
 
         Texture2D               CreateTexture(const uint8* pixels, int width, int height) override;
+        Texture2D               CreateTextureR8(const uint8* pixels, int width, int height) override;
+        Texture2DArray          CreateAtlasArray(int width, int height, int depth) override;
+        void                    SetSubarray(Texture2DArray array, int depth, int w, int h, const uint8* data) override;
+
+        void                    UpdateTextureRect(Texture2D tex, const uint8* pixels, const RectU& rect) override;
+
         void                    DestroyTexture(TexHandle handle) override;
 
     private:
@@ -83,7 +88,7 @@ namespace Hax::Gui
             UINT                        SampleMask;
             UINT                        StencilRef;
             ID3D11DepthStencilState*    DepthStencilState;
-            ID3D11ShaderResourceView*   PSShaderResources[2];
+            ID3D11ShaderResourceView*   PSShaderResources[3];
             ID3D11SamplerState*         PSSampler;
             ID3D11PixelShader*          PS;
             ID3D11VertexShader*         VS;
@@ -106,7 +111,7 @@ namespace Hax::Gui
         m_DeviceContext->RSGetState(&old.RS);
         m_DeviceContext->OMGetBlendState(&old.BlendState, old.BlendFactor, &old.SampleMask);
         m_DeviceContext->OMGetDepthStencilState(&old.DepthStencilState, &old.StencilRef);
-        m_DeviceContext->PSGetShaderResources(0, 2, old.PSShaderResources);
+        m_DeviceContext->PSGetShaderResources(0, 3, old.PSShaderResources);
         m_DeviceContext->PSGetSamplers(0, 1, &old.PSSampler);
 
         UINT numInstances = 0;
@@ -116,7 +121,7 @@ namespace Hax::Gui
         m_DeviceContext->HSGetShader(&old.HS, nullptr, &numInstances); HAX_ASSERT(numInstances == 0);
         m_DeviceContext->DSGetShader(&old.DS, nullptr, &numInstances); HAX_ASSERT(numInstances == 0);
         m_DeviceContext->CSGetShader(&old.CS, nullptr, &numInstances); HAX_ASSERT(numInstances == 0);
-        m_DeviceContext->VSGetConstantBuffers(0, 2, old.VSConstantBuffers);
+        m_DeviceContext->VSGetConstantBuffers(0, 2, old.VSConstantBuffers);//!
 
         m_DeviceContext->IAGetPrimitiveTopology(&old.PrimitiveTopology);
         m_DeviceContext->IAGetIndexBuffer(&old.IndexBuffer, &old.IndexBufferFormat, &old.IndexBufferOffset);
@@ -131,9 +136,10 @@ namespace Hax::Gui
         m_DeviceContext->RSSetState(old.RS); if (old.RS) old.RS->Release();
         m_DeviceContext->OMSetBlendState(old.BlendState, old.BlendFactor, old.SampleMask); if (old.BlendState) old.BlendState->Release();
         m_DeviceContext->OMSetDepthStencilState(old.DepthStencilState, old.StencilRef); if (old.DepthStencilState) old.DepthStencilState->Release();
-        m_DeviceContext->PSSetShaderResources(0, 2, old.PSShaderResources); 
+        m_DeviceContext->PSSetShaderResources(0, 3, old.PSShaderResources);
         if (old.PSShaderResources[0]) old.PSShaderResources[0]->Release();
         if (old.PSShaderResources[1]) old.PSShaderResources[1]->Release();
+        if (old.PSShaderResources[2]) old.PSShaderResources[2]->Release();
         m_DeviceContext->PSSetSamplers(0, 1, &old.PSSampler); if (old.PSSampler) old.PSSampler->Release();
         m_DeviceContext->PSSetShader(old.PS, nullptr, 0); if (old.PS) old.PS->Release();
         m_DeviceContext->VSSetShader(old.VS, nullptr, 0); if (old.VS) old.VS->Release();
@@ -183,7 +189,114 @@ namespace Hax::Gui
         m_Device->CreateShaderResourceView(tex, &srvDesc, &srv);
         tex->Release();
 
-        return Texture2D{.Handle = (Handle)srv, .Width = width, .Height = height};
+        Texture2D tex2d;
+        tex2d.Tex = (Handle)tex;
+        tex2d.Srv = (Handle)srv;
+        tex2d.Width = width;
+        tex2d.Height = height;
+
+        return tex2d;
+    }
+
+    Texture2D DirectX11Backend::CreateTextureR8(const uint8* pixels, int width, int height)
+    {
+        HAX_ASSERT(m_Device != nullptr && "API not initialized");
+
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = width;
+        desc.Height = height;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_R8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        desc.CPUAccessFlags = 0;
+
+        ID3D11Texture2D* tex = nullptr;
+        D3D11_SUBRESOURCE_DATA subResource{};
+        subResource.pSysMem = pixels;
+        subResource.SysMemPitch = 1 * (UINT)width;
+        subResource.SysMemSlicePitch = 0;
+        m_Device->CreateTexture2D(&desc, &subResource, &tex);
+        HAX_ASSERT(tex != nullptr);
+        ID3D11ShaderResourceView* srv = nullptr;
+        m_Device->CreateShaderResourceView(tex, nullptr, &srv);
+        tex->Release();
+
+        Texture2D tex2d;
+        tex2d.Tex = (Handle)tex;
+        tex2d.Srv = (Handle)srv;
+        tex2d.Width = width;
+        tex2d.Height = height;
+
+        return tex2d;
+    }
+
+    Texture2DArray DirectX11Backend::CreateAtlasArray(int width, int height, int depth)
+    {
+        D3D11_TEXTURE2D_DESC desc = {};
+        desc.Width     = width;
+        desc.Height    = height;
+        desc.MipLevels = 1;
+        desc.ArraySize = depth;
+        desc.Format    = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.Usage     = D3D11_USAGE_DEFAULT; 
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+        ID3D11Texture2D* tex = nullptr;
+        m_Device->CreateTexture2D(&desc, nullptr, &tex);
+
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY; // Ключевой флаг
+        srvDesc.Texture2DArray.ArraySize = depth;       // Столько же, сколько в ArraySize текстуры
+        srvDesc.Texture2DArray.FirstArraySlice = 0; // Начинаем с первого слоя
+        srvDesc.Texture2DArray.MipLevels = 1;
+
+        ID3D11ShaderResourceView* pSRV = nullptr;
+        m_Device->CreateShaderResourceView(tex, &srvDesc, &pSRV);
+
+        Texture2DArray tex2d;
+        tex2d.Srv = (Handle)pSRV;
+        tex2d.Tex = (Handle)tex;
+        tex2d.Depth = depth;
+        tex2d.Width = width;
+        tex2d.Height = height;
+
+        return tex2d;
+    }
+
+    void DirectX11Backend::SetSubarray(Texture2DArray array, int depth, int w, int h, const uint8* data)
+    {
+        D3D11_BOX box;
+        box.left = 0;   box.right = w;
+        box.top  = 0;   box.bottom = h;
+        box.front = 0;  box.back = 1;
+
+        UINT subresourceIndex = D3D11CalcSubresource(0, depth, 1);
+
+        UINT rowPitch = w * 4;
+
+        m_DeviceContext->UpdateSubresource((ID3D11Texture2D*)array.Tex, subresourceIndex, &box, data, rowPitch, 0);
+    }
+
+    void DirectX11Backend::UpdateTextureRect(Texture2D tex, const uint8* pixels, const RectU& rect)
+    {
+        if (tex.Tex == 0)
+            return;
+
+        D3D11_BOX destBox;
+        destBox.left   = (UINT)rect.MinX;
+        destBox.top    = (UINT)rect.MinY;
+        destBox.front  = 0;
+        destBox.right  = (UINT)rect.MaxX;
+        destBox.bottom = (UINT)rect.MaxY;
+        destBox.back   = 1;
+
+        const uint8* dest = pixels + rect.MinY * kBitmapSize + rect.MinX;
+        m_DeviceContext->UpdateSubresource((ID3D11Resource*)tex.Tex, 0, &destBox, dest, (UINT)kBitmapSize, 0);
     }
 
     void DirectX11Backend::DestroyTexture(TexHandle handle)
@@ -210,12 +323,12 @@ namespace Hax::Gui
         {
             { "PARAMS",   0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, (uint32)offsetof(RenderItem, Params14), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "PARAMS",   1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, (uint32)offsetof(RenderItem, Params58), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "PARAM",   0, DXGI_FORMAT_R32_FLOAT, 0, (uint32)offsetof(RenderItem, Param9), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "PARAMS",   2, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, (uint32)offsetof(RenderItem, Params912), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "PARAM",   0, DXGI_FORMAT_R32_FLOAT, 0, (uint32)offsetof(RenderItem, Param13), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "PARAM",   1, DXGI_FORMAT_R32_FLOAT, 0, (uint32)offsetof(RenderItem, Param14), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "TYPE",     0, DXGI_FORMAT_R32_UINT,  0, (uint32)offsetof(RenderItem, Type), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "COLOR",   0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, (uint32)offsetof(RenderItem, Color1), D3D11_INPUT_PER_INSTANCE_DATA, 1},
-            { "COLOR",   1, DXGI_FORMAT_R8G8B8A8_UNORM, 0, (uint32)offsetof(RenderItem, Color2), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "COLOR",   2, DXGI_FORMAT_R8G8B8A8_UNORM, 0, (uint32)offsetof(RenderItem, Color3), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "COLOR",   3, DXGI_FORMAT_R8G8B8A8_UNORM, 0, (uint32)offsetof(RenderItem, Color4), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "COLOR",   1, DXGI_FORMAT_R8G8B8A8_UNORM, 0, (uint32)offsetof(RenderItem, Color2), D3D11_INPUT_PER_INSTANCE_DATA, 1},
             { "SINCOS",   0, DXGI_FORMAT_R32G32_FLOAT, 0, (uint32)offsetof(RenderItem, Sin), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
         };
         HRESULT res = m_Device->CreateInputLayout(local_layout, _countof(local_layout), vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize(), &m_InputLayout);
@@ -255,16 +368,6 @@ namespace Hax::Gui
             desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
             desc.MiscFlags = 0;
             HRESULT res = m_Device->CreateBuffer(&desc, nullptr, &m_MatrixContantBuffer);
-            HAX_ASSERT(res == S_OK);
-        }
-        {
-            D3D11_BUFFER_DESC desc{};
-            desc.ByteWidth = sizeof(FontConstData);
-            desc.Usage = D3D11_USAGE_DYNAMIC;
-            desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-            desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-            desc.MiscFlags = 0;
-            HRESULT res = m_Device->CreateBuffer(&desc, nullptr, &m_FontConstantBuffer);
             HAX_ASSERT(res == S_OK);
         }
     }
@@ -315,7 +418,7 @@ namespace Hax::Gui
 
         {
             D3D11_SAMPLER_DESC desc{};
-            desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+            desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
             desc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
             desc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
             desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -375,6 +478,9 @@ namespace Hax::Gui
         m_DeviceContext->OMSetBlendState(m_BlendState, blend_factor, 0xffffffff);
         m_DeviceContext->OMSetDepthStencilState(m_DepthStencilState, 0);
         m_DeviceContext->RSSetState(m_RasterizerState);
+
+        m_DeviceContext->PSSetShaderResources(1, 1, (ID3D11ShaderResourceView**)&g_Context->AtlasArray.Srv);
+        m_DeviceContext->PSSetShaderResources(2, 1, (ID3D11ShaderResourceView**)&g_Context->Bitmap.Texture.Srv);
     }
 
     void DirectX11Backend::CopyRenderItems(Vector<Layer*>& layers)
@@ -437,21 +543,6 @@ namespace Hax::Gui
                     m_DeviceContext->RSSetScissorRects(1, &rect);
                 }
 
-                if (batch.ActionMask & RenderBatchAction_SetFont)
-                {
-                    D3D11_MAPPED_SUBRESOURCE mapped_resource;
-                    if (m_DeviceContext->Map(m_FontConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped_resource) == S_OK)
-                    {
-                        FontConstData* data = (FontConstData*)mapped_resource.pData;
-                        data->PxRange = batch.Font->DistanceRange;
-                        data->TexWidth = (float)batch.Font->Atlas.Width;
-                        data->TexHeight = (float)batch.Font->Atlas.Height;
-                        m_DeviceContext->Unmap(m_FontConstantBuffer, 0);
-                    }
-                    m_DeviceContext->VSSetConstantBuffers(1, 1, &m_FontConstantBuffer);
-                    m_DeviceContext->PSSetShaderResources(1, 1, (ID3D11ShaderResourceView**)&batch.Font->Atlas.Handle);
-                }
-
                 if (batch.ActionMask & RenderBatchAction_SetTexture)
                 {
                     m_DeviceContext->PSSetShaderResources(0, 1, (ID3D11ShaderResourceView**)&batch.Texture);
@@ -463,12 +554,20 @@ namespace Hax::Gui
         }
     }
 
-    bool DirectX11_Init(ID3D11Device* device)
+    extern void Initialize(Handle hwnd);
+
+    void Initialize(Handle hwnd, ID3D11Device* device)
     {
-        DirectX11Backend* graphicsApi = g_Context->GeneralAlloc.New<DirectX11Backend>(*g_Context);
+        HAX_ASSERT(g_Context == nullptr && "Context already initialized");
+
+        g_Context = New<Context>();
+        Initialize(hwnd);
+
+        DirectX11Backend* graphicsApi = New<DirectX11Backend>(g_Context->GeneralAlloc, *g_Context);
+        graphicsApi->Init(device);
         g_Context->Backend = graphicsApi;
 
-        return graphicsApi->Init(device);
+        g_Context->Bitmap.Texture = g_Context->Backend->CreateTextureR8(g_Context->Bitmap.Pixels, kBitmapSize, kBitmapSize);
     }
 
     const char* g_VertexShaderText = R"(
@@ -477,22 +576,16 @@ cbuffer vertexBuffer : register(b0)
     float4x4 ProjectionMatrix;
 };
 
-cbuffer fontBuffer : register(b1)
-{
-    float PxRange;
-    float2 TexSize;
-};
-
 struct VS_INPUT      
 {
     float4 params14 : PARAMS0;
     float4 params58 : PARAMS1;
-    float param9 : PARAM0;
+    float4 params912 : PARAMS2;
+    float param13 : PARAM0;
+    float param14 : PARAM1;
 
     float4 color1 : COLOR0;
     float4 color2 : COLOR1;
-    float4 color3 : COLOR2;
-    float4 color4 : COLOR3;
 
     float2 sincos: SINCOS0;
     uint type : TYPE0;
@@ -504,12 +597,12 @@ struct VS_OUTPUT
 
     float4 params14 : PARAMS0;
     float4 params58 : PARAMS1;
-    float param9 : PARAM0;
+    float4 params912 : PARAMS2;
+    float param13 : PARAM0;
+    float param14 : PARAM1;
 
     float4 color1 : COLOR0;
     float4 color2 : COLOR1;
-    float4 color3 : COLOR2;
-    float4 color4 : COLOR3;
 
     float2 pixPos : TEXCOORD0;
     float2 sincos: SINCOS0;
@@ -554,21 +647,50 @@ float2 calcRect(VS_INPUT input, uint vertId)
     return rotated[vertId];
 }
 
+float2 calcGlyphRect(VS_INPUT input, uint vertId)
+{
+    float2 tl = input.params14.xy;
+    float2 br = input.params14.zw;
+
+    float2 center = (tl + br) * 0.5;
+    float2 tr = rotate(float2(br.x, tl.y), center, input.sincos);
+    float2 bl = rotate(float2(tl.x, br.y), center, input.sincos);
+    tl = rotate(tl, center, input.sincos);
+    br = rotate(br, center, input.sincos);
+
+    float2 rotated[6] = { tl, tr, bl, bl, tr, br };
+    return rotated[vertId];
+}
+
 float2 calcTriangle(VS_INPUT input, uint vertId)
 {
-    if (vertId > 2) return float2(0,0);
-
     float2 a = input.params14.xy;
     float2 b = input.params14.zw;
     float2 c = input.params58.xy;
+    float th = input.params58.z; 
+    float padding = th + 2.0;
 
     float2 center = (a + b + c) / 3.0;
     a = rotate(a, center, input.sincos);
     b = rotate(b, center, input.sincos);
     c = rotate(c, center, input.sincos);
 
-    float2 rotated[3] = { a, b, c };
-    return rotated[vertId];
+    float2 p[3] = { a, b, c };
+    float2 current = p[vertId];
+    
+    float2 prev = p[(vertId + 2) % 3];
+    float2 next = p[(vertId + 1) % 3];
+    
+    float2 dir1 = normalize(current - prev);
+    float2 dir2 = normalize(current - next);
+    
+    float2 outDir = normalize(dir1 + dir2);
+    
+    float cosA = dot(dir1, dir2);
+    float sinA = sqrt(max(0.0, 1.0 - cosA * cosA));
+    float expandDist = padding / max(0.1, sinA); 
+
+    return current + outDir * expandDist;
 }
 
 float2 calcLine(VS_INPUT input, uint vertId)
@@ -601,7 +723,32 @@ VS_OUTPUT main(VS_INPUT input, uint vertId : SV_VertexID)
 
     switch (input.type)
     {
-        case 0: output.pixPos = calcEllipse(input, vertId); break;
+        case 0: output.pos = float4(0.0f, 0.0f, 0.0f, 1.0f); break;
+        case 1: output.pixPos = calcEllipse(input, vertId); break;
+        case 7:
+        {
+            float2 vert_to_uv[6] = { {0,0}, {1,0}, {0,1}, {0,1}, {1,0}, {1,1} };
+    
+            float2 uvMin = input.params58.xy;
+            float2 uvMax = input.params58.zw;
+    
+            input.params58.xy = lerp(uvMin, uvMax, vert_to_uv[vertId]);
+            output.pixPos = calcGlyphRect(input, vertId);
+            break;
+        }
+        case 6:
+        {
+            float2 vert_to_uv[6] = { {0,0}, {1,0}, {0,1}, {0,1}, {1,0}, {1,1} };
+    
+            float2 uvMin = input.params58.xy;
+            float2 uvMax = input.params58.zw;
+    
+            input.params58.xy = lerp(uvMin, uvMax, vert_to_uv[vertId]);
+            input.params14.xy += 2.0;
+            input.params14.zw -= 2.0;
+            output.pixPos = calcRect(input, vertId);
+            break;
+        }
         case 5:
         {
             float2 vert_to_uv[6] = { {0,0}, {1,0}, {0,1}, {0,1}, {1,0}, {1,1} };
@@ -613,38 +760,23 @@ VS_OUTPUT main(VS_INPUT input, uint vertId : SV_VertexID)
             input.params14.xy += 2.0;
             input.params14.zw -= 2.0;
             output.pixPos = calcRect(input, vertId);
-            input.params14.xy = TexSize;
-            input.params14.z = PxRange;
             break;
         }
-        case 4:
-        {
-            float2 vert_to_uv[6] = { {0,0}, {1,0}, {0,1}, {0,1}, {1,0}, {1,1} };
-    
-            float2 uvMin = input.params58.xy;
-            float2 uvMax = input.params58.zw;
-    
-            input.params58.xy = lerp(uvMin, uvMax, vert_to_uv[vertId]);
-            input.params14.xy += 2.0;
-            input.params14.zw -= 2.0;
-            output.pixPos = calcRect(input, vertId);
-            break;
-        }
-        case 1: 
+        case 2: 
             float2 a = input.params14.xy; float2 b = input.params14.zw;
             input.params14.xy = min(a,b); input.params14.zw = max(a,b);
             output.pixPos = calcRect(input, vertId); break;
-        case 2: output.pixPos = calcTriangle(input, vertId); break;
-        case 3: output.pixPos = calcLine(input, vertId); break;
+        case 3: output.pixPos = calcTriangle(input, vertId); break;
+        case 4: output.pixPos = calcLine(input, vertId); break;
     }
 
     output.params14 = input.params14;
     output.params58 = input.params58;
-    output.param9 = input.param9;
+    output.params912 = input.params912;
+    output.param13 = input.param13;
+    output.param14 = input.param14;
     output.color1 = input.color1;
     output.color2 = input.color2;
-    output.color3 = input.color3;
-    output.color4 = input.color4;
     output.sincos = input.sincos;
     output.type = input.type;
     output.pos = mul(ProjectionMatrix, float4(output.pixPos, 0.f, 1.f));
@@ -660,12 +792,12 @@ struct PS_INPUT
 
     float4 params14 : PARAMS0;
     float4 params58 : PARAMS1;
-    float param9 : PARAM0;
+    float4 params912 : PARAMS2;
+    float param13 : PARAM0;
+    float param14 : PARAM1;
 
     float4 color1 : COLOR0;
     float4 color2 : COLOR1;
-    float4 color3 : COLOR2;
-    float4 color4 : COLOR3;
 
     float2 pixPos : TEXCOORD0;
     float2 sincos: SINCOS;
@@ -683,10 +815,10 @@ float2 fastMap(float2 p, float2 center, float2 sincos)
 
 float sdEllipse(float2 p, float2 center, float2 r)
 {
-    p -= center;
-    float k1 = length(p / r);
-    float k2 = length(p / (r * r));
-    return k1 * (k1 - 1.0) / k2;
+    float2 q = p - center;
+    float k1 = length(q / r);
+    float k2 = length(q / (r * r));
+    return (k1 - 1.0) * k1 / k2;
 }
 
 float4 shaderEllipse(PS_INPUT input)
@@ -696,23 +828,21 @@ float4 shaderEllipse(PS_INPUT input)
     float2 r      = input.params14.zw;
     float  th     = input.params58.x;
 
-    float4 fillColor  = input.color1;
-    float4 frameColor = input.color2;
-
     float2 pRot = fastMap(p, center, input.sincos);
 
     float d  = sdEllipse(pRot, center, r);
-    float aa = fwidth(d) * 0.7;
+    float aa = fwidth(d);
 
-    float outerMask = smoothstep(aa, -aa, d);
-    float innerMask = smoothstep(aa, -aa, d + th);
+    float s_d = abs(d + th * 0.5f) - th * 0.5f;
+    float s_mask = smoothstep(aa, -aa, s_d) * step(0.0001f, th);
+    
+    float f_mask = smoothstep(aa, -aa, d);
+    f_mask = saturate(f_mask - s_mask);
 
-    float4 finalColor = lerp(frameColor, fillColor, innerMask);
+    float4 fill = float4(input.color1.rgb * input.color1.a * f_mask, input.color1.a * f_mask);
+    float4 stroke = float4(input.color2.rgb * input.color2.a * s_mask, input.color2.a * s_mask);
 
-    finalColor.a *= outerMask;
-    finalColor.rgb *= finalColor.a;
-
-    return finalColor;
+    return stroke + fill;
 }
 
 float sdRect(float2 p, float2 a, float2 b, float4 r)
@@ -722,7 +852,7 @@ float sdRect(float2 p, float2 a, float2 b, float4 r)
     p -= center;
 
     float2 s = step(0.0, p);
-    float rad = lerp(lerp(r.x, r.w, s.x), lerp(r.y, r.z, s.x), s.y);
+    float rad = lerp(lerp(r.x, r.y, s.x), lerp(r.w, r.z, s.x), s.y);
 
     float2 d = abs(p) - halfSize + rad;
     return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - rad;
@@ -734,27 +864,25 @@ float4 shaderRect(PS_INPUT input)
     float2 a = input.params14.xy;
     float2 b = input.params14.zw;
     float4 r = input.params58;
-    float th = input.param9;
-
-    float4 fillColor  = input.color1;
-    float4 frameColor = input.color2;
+    float4 th = input.params912.x;
 
     float2 halfSize = abs(b - a) * 0.5;
     float2 center   = a + halfSize;
     float2 pRot     = fastMap(p, center, input.sincos);
 
     float d  = sdRect(pRot, a, b, r);
-    float aa = fwidth(d) * 0.7;
+    float aa = fwidth(d) * 0.5;
 
-    float maskOuter = smoothstep(aa, -aa, d);
-    float maskInner = smoothstep(aa, -aa, d + th);
+    float s_d = abs(d + th * 0.5) - th * 0.5;
+    float s_mask = smoothstep(aa, -aa, s_d) * step(0.0001, th);
+    
+    float f_mask = smoothstep(aa, -aa, d);
+    f_mask = saturate(f_mask - s_mask); 
 
-    float4 finalColor = lerp(frameColor, fillColor, maskInner);
+    float4 fill = float4(input.color1.rgb * input.color1.a * f_mask, input.color1.a * f_mask);
+    float4 stroke = float4(input.color2.rgb * input.color2.a * s_mask, input.color2.a * s_mask);
 
-    finalColor.a *= maskOuter;
-    finalColor.rgb *= finalColor.a;
-
-    return finalColor;
+    return stroke + fill;
 }
 
 float sdTriangle(float2 p, float2 a, float2 b, float2 c)
@@ -773,31 +901,28 @@ float sdTriangle(float2 p, float2 a, float2 b, float2 c)
 
 float4 shaderTriangle(PS_INPUT input)
 {
-    float2 p = input.pixPos;
+    float2 p  = input.pixPos;
+    float2 a  = input.params14.xy;
+    float2 b  = input.params14.zw;
+    float2 c  = input.params58.xy;
+    float th  = input.params58.z;
 
-    float2 a = input.params14.xy;
-    float2 b = input.params14.zw;
-    float2 c = input.params58.xy;
-    float th = input.params58.z;
-
-    float4 fillColor  = input.color1;
-    float4 frameColor = input.color2;
-
-    float2 center = (a + b + c) / 3.0;
+    float2 center = (a + b + c) / 3.0f;
     float2 pRot   = fastMap(p, center, input.sincos);
 
     float d  = sdTriangle(pRot, a, b, c);
-    float aa = fwidth(d) * 0.7;
+    float aa = fwidth(d);
 
-    float outerMask = smoothstep(aa, -aa, d);
-    float innerMask = smoothstep(aa, -aa, d + th);
-
-    float4 finalColor = lerp(frameColor, fillColor, innerMask);
+    float s_d = abs(d + th * 0.5f) - th * 0.5f;
+    float s_mask = smoothstep(aa, -aa, s_d) * step(0.0001f, th);
     
-    finalColor.a *= outerMask;
-    finalColor.rgb *= finalColor.a;
+    float f_mask = smoothstep(aa, -aa, d);
+    f_mask = saturate(f_mask - s_mask);
 
-    return finalColor;
+    float4 fill = float4(input.color1.rgb * input.color1.a * f_mask, input.color1.a * f_mask);
+    float4 stroke = float4(input.color2.rgb * input.color2.a * s_mask, input.color2.a * s_mask);
+
+    return stroke + fill;
 }
 
 float sdSegment(float2 p, float2 a, float2 b)
@@ -823,7 +948,7 @@ float4 shaderLine(PS_INPUT input)
 
     float d = sdSegment(pRot, a, b) - th * 0.5;
 
-    float aa = fwidth(d) * 0.5;
+    float aa = fwidth(d) * 0.4;
 
     float coverage = smoothstep(aa, -aa, d);
 
@@ -836,25 +961,27 @@ float4 shaderLine(PS_INPUT input)
 
 sampler sampler0 : register(s0);
 Texture2D texture0 : register(t0);
-Texture2D fontTexture : register(t1);
+Texture2DArray fontTexture : register(t1);
+Texture2D atlasTexture : register(t2);
 float4 shaderImage(PS_INPUT input)
 {
     float2 p = input.pixPos;
-    float2 a = input.params14.xy;
-    float2 b = input.params14.zw;
-    float4 r = float4(input.param9, input.param9, input.param9, input.param9);
+    float2 a = input.params14.xy - float2(1, 1);
+    float2 b = input.params14.zw + float2(1, 1);
+
+    float r = input.params912.x;
+    float4 r4 = float4(r, r, r, r);
 
     float4 src = texture0.Sample(sampler0, input.params58.xy);
-    
     float2 halfSize = abs(b - a) * 0.5;
     float2 center = a + halfSize;
     float2 pRot = fastMap(p, center, input.sincos);
     
     float d = sdRect(pRot, a, b, r);
-    float aa = fwidth(d) * 0.7;
+    float aa = fwidth(d);
 
     float mask = smoothstep(aa, -aa, d);
-
+    
     float4 finalColor = src * input.color1;
     finalColor.a *= mask;
     finalColor.rgb *= finalColor.a;
@@ -862,26 +989,45 @@ float4 shaderImage(PS_INPUT input)
     return finalColor;
 }
 
-float4 shaderGlyph(PS_INPUT input)
+float4 shaderMsdfGlyph(PS_INPUT input)
 {
-    float2 uv = input.params58.xy;
-    float pxRange = input.params14.z;
-    float2 texSize = input.params14.xy;
-    
+    float3 uv = float3(input.params58.xy, input.params912.x);
+    float pxRange = input.params912.y;
+    float2 texSize = input.params912.zw;
+    float weight = input.param13;
+
+    float outlineFactor = 0.2 * step(0.01, input.param14); 
+    float4 strokeColor = input.color2;
+
     float3 msd = fontTexture.Sample(sampler0, uv).rgb; 
-    
-    float2 dest = 1.0 / fwidth(uv); 
+    float d_raw = max(min(msd.r, msd.g), min(max(msd.r, msd.g), msd.b));
+    float d = d_raw + weight;
+
+    float2 dest = 1.0 / fwidth(uv.xy); 
     float px_size = max(0.5 * dot((pxRange / texSize), dest), 1.0);
     
-    float d = max(min(msd.r, msd.g), min(max(msd.r, msd.g), msd.b));
+    float f_mask = saturate((d - 0.5) * px_size + 0.5);
+    float s_mask = saturate((d - (0.5 - outlineFactor)) * px_size + 0.5);
     
-    float a = clamp((d - 0.5) * px_size + 0.5, 0.0, 1.0);
+    s_mask *= step(0.01, d_raw); 
+    
+    float o_mask = saturate(s_mask - f_mask);
 
-    float4 finalColor = input.color1;
-    finalColor.a *= a;
-    finalColor.rgb *= finalColor.a;
+    float4 fill = float4(input.color1.rgb * input.color1.a * f_mask, input.color1.a * f_mask);
+    float4 stroke = float4(strokeColor.rgb * strokeColor.a * o_mask, strokeColor.a * o_mask);
 
-    return finalColor;
+    return fill + stroke;
+}
+
+float4 shaderGlyph(PS_INPUT input) 
+{
+    float2 uv = input.params58.xy;
+    float a = atlasTexture.Sample(sampler0, uv).r;
+
+    float4 col = input.color1;
+    col.a *= a;
+    col.rgb *= col.a;
+    return col;
 }
 
 float4 main(PS_INPUT input) : SV_Target
@@ -889,12 +1035,13 @@ float4 main(PS_INPUT input) : SV_Target
     input.sincos.x = -input.sincos.x;
     switch (input.type)
     {
-        case 0: return shaderEllipse(input);
-        case 1: return shaderRect(input);
-        case 2: return shaderTriangle(input);
-        case 3: return shaderLine(input);
-        case 4: return shaderImage(input);
-        case 5: return shaderGlyph(input);
+        case 1: return shaderEllipse(input);
+        case 2: return shaderRect(input);
+        case 3: return shaderTriangle(input);
+        case 4: return shaderLine(input);
+        case 5: return shaderImage(input);
+        case 6: return shaderMsdfGlyph(input);
+        case 7: return shaderGlyph(input);
     }
     return float4(0,0,0,0);
 }

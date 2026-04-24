@@ -4,53 +4,49 @@
 
 using namespace Hax;
 
-TEST(HashTest, ConstexprSafety) 
+struct TrivialStruct
 {
-    static_assert(GetTypeId<int>() != GetTypeId<float>(), "Collision between int and float!");
-    static_assert(GetTypeId<int>() == GetTypeId<int>(), "Deterministic failure for int!");
-
-    static constexpr size_t h1 = Hash(L"UnityObject");
-    static constexpr size_t h2 = Hash(L"UnityObject");
-    static_assert(h1 == h2, "Hash must be deterministic");
-}
-
-class HashRuntimeTest : public ::testing::Test 
-{
-protected:
-    Allocator& alloc = g_GlobalAlloc;
+    int A = 3, B = 4;
 };
 
-TEST_F(HashRuntimeTest, StringConsistency) 
+struct TrivialPaddedStruct
 {
-    const wchar_t* raw = L"SDK_Test_String";
-    String str(raw, alloc);
-    StringView view(raw);
+    int A = 3;
+    size_t B = 4;
+};
 
-    // Все три вида представления одной строки должны давать идентичный хеш
-    EXPECT_EQ(Hash(raw), Hash(str));
-    EXPECT_EQ(Hash(str), Hash(view));
-    EXPECT_EQ(Hash(raw), Hash(view));
+TEST(HashTest, TypesId)
+{
+    static_assert(GetTypeId<int>() != GetTypeId<float>());
+    static_assert(GetTypeId<int>() == GetTypeId<int>());
+    static_assert(GetTypeId<TrivialStruct> != GetTypeId<TrivialPaddedStruct>);
 }
 
-TEST_F(HashRuntimeTest, CaseSensitivity) 
+TEST(HashTest, Determinism)
 {
-    EXPECT_NE(Hash(L"Player"), Hash(L"player"));
+    constexpr const wchar_t* str1 = L"Hello world!";
+    constexpr const wchar_t* str1Copy = L"Hello world!\0";
+    constexpr const wchar_t* otherStr = L"Goodbye world!";
+    constexpr StringView sv = L"Hello world!";
+    String str2 = L"Hello world!";
+
+    static_assert(Hash(str1) == Hash(sv));
+    static_assert(Hash(str1) == Hash(str1Copy));
+    EXPECT_EQ(Hash(str1), Hash(str2));
+    static_assert(Hash(otherStr) != Hash(str1));
 }
 
-TEST_F(HashRuntimeTest, TriCoStructures) 
+TEST(HashTest, Structures)
 {
-    struct MyState 
-    {
-        int id;
-        float health;
-    };
-    // Убеждаемся, что концепт TriCo работает
-    static_assert(TriCo<MyState>);
+    TrivialStruct ts1 = { 3, 4 };
+    TrivialStruct ts2 = { 3, 4 };
+    TrivialStruct ts3 = { 4, 4 };
+    EXPECT_EQ(Hash(ts1), Hash(ts1));
+    EXPECT_EQ(Hash(ts1), Hash(ts2));
+    EXPECT_NE(Hash(ts2), Hash(ts3));
 
-    MyState s1{ 42, 100.0f };
-    MyState s2{ 42, 100.0f };
-    MyState s3{ 43, 100.0f };
-
-    EXPECT_EQ(Hash(s1), Hash(s2));
-    EXPECT_NE(Hash(s1), Hash(s3));
+    TrivialPaddedStruct tps1; memset(&tps1, 8, sizeof(tps1)); tps1.A = 3; tps1.B = 4;
+    TrivialPaddedStruct tps2; memset(&tps2, 9, sizeof(tps2)); tps2.A = 3; tps2.B = 4;
+    EXPECT_NE(memcmp(&tps1, &tps2, sizeof(TrivialPaddedStruct)), 0);
+    EXPECT_EQ(Hash(tps1), Hash(tps2));
 }

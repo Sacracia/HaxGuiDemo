@@ -6,80 +6,75 @@
 #include <algorithm>
 #include <random>
 #include <chrono>
+#include <unordered_map>
 
 #include "../haxgui.h"
 
 using namespace Hax;
 
-class MapPerfTest : public ::testing::Test {
+#define PROFILE_BLOCK(title, ...) { \
+    auto start = std::chrono::high_resolution_clock::now(); \
+    __VA_ARGS__; \
+    auto end = std::chrono::high_resolution_clock::now(); \
+    auto dur = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count(); \
+    std::cout << "[ BENCHMARK ] " << title << ": " << dur << " ns total" << std::endl; \
+}
+
+class MapBenchmark : public ::testing::Test {
 protected:
-    const int N = 1000;
-    const int Iterations = 1000;
-    std::vector<int> keys;
+    static const int N = 100; 
+    int keys[N];
 
     void SetUp() override {
+        for (int i = 0; i < N; ++i) keys[i] = i;
         std::mt19937 gen(42);
-        for (int i = 0; i < N; ++i) keys.push_back(i);
-        std::shuffle(keys.begin(), keys.end(), gen);
+        std::shuffle(keys, keys + N, gen);
     }
 };
 
-TEST_F(MapPerfTest, Benchmark_HaxMap_Insert) {
-    Map<int, int> myMap;
-    myMap.Reserve(N);
-    for (int k : keys) {
-        myMap.Insert(k, k);
-    }
+TEST_F(MapBenchmark, Insertion_Comparison) {
+    std::cout << "\n--- Insertion (N=" << N << ") ---" << std::endl;
+
+    // 1. Твой Map (HaxMap)
+    PROFILE_BLOCK("HaxMap (Reserve + Insert)", {
+        Map<int, int> hax;
+    hax.Reserve(N);
+    for (int i = 0; i < N; ++i) hax.Insert(keys[i], i);
+        });
+
+    // 3. std::map
+    PROFILE_BLOCK("std::map (Insert)", {
+        std::map<int, int> s_map;
+    for (int i = 0; i < N; ++i) s_map[keys[i]] = i;
+        });
 }
 
-TEST_F(MapPerfTest, Benchmark_StdMap_Insert) {
-    std::map<int, int> stdMap;
-    for (int k : keys) {
-        stdMap[k] = k;
-    }
-}
+TEST_F(MapBenchmark, Search_Comparison) {
+    // Подготовка данных вне замера
+    Map<int, int> hax; hax.Reserve(N);
+    std::unordered_map<int, int> u_map;
+    std::map<int, int> s_map;
 
-TEST_F(MapPerfTest, PureSearch_HaxMap) {
-    Map<int, int> myMap;
-    myMap.Reserve(N);
-    for (int k : keys) myMap.Insert(k, k);
+    for (int i = 0; i < N; ++i) {
+        hax.Insert(keys[i], i);
+        u_map[keys[i]] = i;
+        s_map[keys[i]] = i;
+    }
 
     volatile int sum = 0;
-    for (int i = 0; i < Iterations; ++i) {
-        for (int k : keys) {
-            int* v = myMap.Get(k);
-            if (v) sum += *v;
-        }
-    }
-}
+    std::cout << "\n--- Search Latency (1000 iterations over N=" << N << ") ---" << std::endl;
 
-TEST_F(MapPerfTest, PureSearch_StdMap) {
-    std::map<int, int> stdMap;
-    for (int k : keys) stdMap[k] = k;
+    PROFILE_BLOCK("HaxMap Search", {
+            for (int i = 0; i < N; ++i) {
+                int* v = hax.Get(keys[i]);
+                if (v) sum += *v;
+            }
+        });
 
-    volatile int sum = 0;
-    for (int i = 0; i < Iterations; ++i) {
-        for (int k : keys) {
-            auto it = stdMap.find(k);
-            if (it != stdMap.end()) sum += it->second;
-        }
-    }
-}
-
-TEST_F(MapPerfTest, Benchmark_HaxMap_Erase) {
-    Map<int, int> myMap;
-    for (int k : keys) myMap.Insert(k, k);
-
-    for (int k : keys) {
-        myMap.Erase(k);
-    }
-}
-
-TEST_F(MapPerfTest, Benchmark_StdMap_Erase) {
-    std::map<int, int> stdMap;
-    for (int k : keys) stdMap[k] = k;
-
-    for (int k : keys) {
-        stdMap.erase(k);
-    }
+    PROFILE_BLOCK("std::map Search", {
+            for (int i = 0; i < N; ++i) {
+                auto res = s_map.find(keys[i]);
+                if (res != s_map.end()) sum += res->second;
+            }
+        });
 }

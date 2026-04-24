@@ -11,14 +11,14 @@ protected:
 
     void SetUp() override 
     {
-        initialMemory = g_GlobalAlloc.TotalUsage();
+        initialMemory = g_GlobalAlloc.TotalAllocated;
     }
 
     void TearDown() override 
     {
-        EXPECT_EQ(g_GlobalAlloc.TotalUsage(), initialMemory) 
+        EXPECT_EQ(g_GlobalAlloc.TotalAllocated, initialMemory) 
             << "Memory leak detected! Usage before: " << initialMemory 
-            << ", after: " << g_GlobalAlloc.TotalUsage();
+            << ", after: " << g_GlobalAlloc.TotalAllocated;
     }
 };
 
@@ -39,7 +39,7 @@ TEST_F(StringTest, AssignmentAllocatesCorrectAmount)
     EXPECT_STREQ(s.CStr(), testStr);
 
     size_t expectedSize = (5 + 1) * sizeof(wchar_t);
-    size_t totalUsage = g_GlobalAlloc.TotalUsage();
+    size_t totalUsage = g_GlobalAlloc.TotalAllocated;
     size_t init = initialMemory;
     EXPECT_GE(totalUsage - init, expectedSize);
 }
@@ -57,9 +57,9 @@ TEST_F(StringTest, ClearFreeResetsMemoryUsage)
 {
     {
         String s(L"Temporary Data");
-        EXPECT_GT(g_GlobalAlloc.TotalUsage(), initialMemory);
+        EXPECT_GT(g_GlobalAlloc.TotalAllocated, initialMemory);
         s.ClearFree();
-        EXPECT_EQ(g_GlobalAlloc.TotalUsage(), initialMemory);
+        EXPECT_EQ(g_GlobalAlloc.TotalAllocated, initialMemory);
         EXPECT_TRUE(s.Empty());
         EXPECT_STREQ(s.CStr(), L"");
     }

@@ -113,9 +113,11 @@
     <ClInclude Include="pch.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="hashmap_benchmarks.cpp" />
     <ClCompile Include="hash_tests.cpp" />
     <ClCompile Include="map_benchmarks.cpp" />
     <ClCompile Include="map_tests.cpp" />
+    <ClCompile Include="stringbuilder_tests.cpp" />
     <ClCompile Include="string_tests.cpp" />
     <ClCompile Include="vector_tests.cpp" />
     <ClCompile Include="pch.cpp">
