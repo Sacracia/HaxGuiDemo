@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstdarg>
 #include <atomic>
+#include <bit>
+#include <initializer_list>
 #include <stdio.h>
 
 #define HAX_ASSERT(expr) _ASSERTE(expr)
@@ -56,6 +58,7 @@ namespace Hax
     struct Vector2
     {
         constexpr bool          operator==(const Vector2& o) const  = default;
+        constexpr bool          operator!=(const Vector2& o) const  = default;
         constexpr explicit      operator bool() const               { return X != 0 && Y != 0; }
 
         constexpr Vector2       operator*(const float v) const      { return Vector2(X * v, Y * v); }
@@ -71,8 +74,6 @@ namespace Hax
         constexpr Vector2&      operator-=(const Vector2& rhs)      { X -= rhs.X; Y -= rhs.Y; return *this; }
         constexpr Vector2&      operator*=(const Vector2& rhs)      { X *= rhs.X; Y *= rhs.Y; return *this; }
         constexpr Vector2&      operator/=(const Vector2& rhs)      { X /= rhs.X; Y /= rhs.Y; return *this; }
-        constexpr bool          operator==(const Vector2& rhs)      { return X == rhs.X && Y == rhs.Y; }
-        constexpr bool          operator!=(const Vector2& rhs)      { return X != rhs.X || Y != rhs.Y; }
 
         float                   Length() const                      { return Sqrt(X * X + Y * Y); }
 
@@ -200,9 +201,9 @@ namespace Hax
     template<TriCo T>
     struct Span
     {
-        Span() = default;
-        Span(T* data, size_t size) : m_Data(data), m_Size(size) {}
-        template<size_t N> Span(T (&arr)[N]) : m_Data(arr), m_Size(N) {}
+                                Span() = default;
+                                Span(T* data, size_t size) : m_Data(data), m_Size(size) {}
+        template<size_t N>      Span(T (&arr)[N]) : m_Data(arr), m_Size(N) {}
         template<typename Cont> Span(Cont& c) : m_Data(c.Data()), m_Size(c.Size()) {}
 
         const T&                operator[](size_t idx) const        { HAX_ASSERT(idx < m_Size); return m_Data[idx]; }
@@ -230,8 +231,8 @@ namespace Hax
         constexpr                   StringViewImpl(const StringViewImpl& other) = default;
         constexpr                   StringViewImpl(const T* str, size_t len) : m_Str(str), m_Len(len) {}
         constexpr                   StringViewImpl(const T* s) : m_Str(s), m_Len(StrLen(s)) {}
-        StringViewImpl(std::nullptr_t) = delete;
-        StringViewImpl(std::nullptr_t, size_t len) = delete;
+                                    StringViewImpl(std::nullptr_t) = delete;
+                                    StringViewImpl(std::nullptr_t, size_t len) = delete;
 
         constexpr StringViewImpl&   operator=(const StringViewImpl& other) = default;
 
@@ -253,7 +254,7 @@ namespace Hax
         constexpr bool              Equals(const StringViewImpl& other) const       { return Compare(other) == 0; }
         constexpr bool              EndsWith(const StringViewImpl& suf) const       { if (m_Len < suf.m_Len) return false; for (size_t i = 0; i < suf.m_Len; ++i) if (m_Str[m_Len - suf.m_Len + i] != suf.m_Str[i]) return false; return true; }
         constexpr bool              StartsWith(const StringViewImpl& suf) const     { if (m_Len < suf.m_Len) return false; for (size_t i = 0; i < suf.m_Len; ++i) if (m_Str[i] != suf.m_Str[i]) return false; return true; }
-        constexpr int Compare(const StringViewImpl& other) const 
+        constexpr int               Compare(const StringViewImpl& other) const 
         {
             size_t minLen = (m_Len < other.m_Len) ? m_Len : other.m_Len;
 
@@ -367,6 +368,10 @@ namespace Hax
         return Hash(&tmp, sizeof(T));
     }
 
+    inline constexpr size_t Hash(int v)             { return static_cast<size_t>(v); }
+    inline constexpr size_t Hash(int64 v)           { return static_cast<size_t>(v); }
+    inline constexpr size_t Hash(unsigned int v)    { return static_cast<size_t>(v); }
+
     template <typename T>
     constexpr size_t GetTypeId() 
     { 
@@ -380,20 +385,24 @@ namespace Hax
     template <TriCo T, size_t N>
     struct Array
     {
-        Array() = default;
-        Array(const T& val) { for (size_t i = 0; i < N; ++i) m_Data[i] = val; }
+        constexpr               Array() = default;
+        constexpr               Array(const T& val) { for (size_t i = 0; i < N; ++i) m_Data[i] = val; }
+        constexpr               Array(std::initializer_list<T> list) { HAX_ASSERT(list.size() <= N); size_t i = 0; for (const auto& item : list) m_Data[i++] = item; for (; i < N; ++i) m_Data[i] = T{}; }
 
-        constexpr size_t    Size() const { return N; }
+        constexpr size_t        Size() const { return N; }
 
-        T&                  operator[](size_t index)                { HAX_ASSERT(index < N); return m_Data[index]; }
-        const T&            operator[](size_t index) const          { HAX_ASSERT(index < N); return m_Data[index]; }
+        constexpr T&            operator[](size_t index)                { HAX_ASSERT(index < N); return m_Data[index]; }
+        constexpr const T&      operator[](size_t index) const          { HAX_ASSERT(index < N); return m_Data[index]; }
 
-        T*                  begin()                                 { return m_Data; }
-        const T*            begin() const                           { return m_Data; }
-        T*                  end()                                   { return m_Data + N; }
-        const T*            end() const                             { return m_Data + N; }
+        constexpr bool          operator==(const Array<T, N>& o) const  { for (size_t i = 0; i < N; ++i) if (m_Data[i] != o.m_Data[i]) return false; return true; }
 
-        T                   m_Data[N];
+        constexpr T*            begin()                                 { return m_Data; }
+        constexpr const T*      begin() const                           { return m_Data; }
+        constexpr T*            end()                                   { return m_Data + N; }
+        constexpr const T*      end() const                             { return m_Data + N; }
+
+    private:
+        T                       m_Data[N];
     };
 
     template <TriCo T>
@@ -499,8 +508,6 @@ namespace Hax
         Vector<wchar_t>     m_Data{g_GlobalAlloc};
     };
     inline size_t Hash(const String& s) { return Hash(StringViewImpl(s.CStr(), s.Length())); }
-
-
 
     template<CharT T, size_t MaxLength = 128>
     struct BasicStringBuilder
@@ -981,27 +988,41 @@ namespace Hax
     V& HashMap<K,V>::FindOrAdd(const K& key) 
     {
         if (m_Count * 10 >= m_Entries.Size() * 7)
+        {
             Grow();
+        }
 
-        size_t cap = m_Entries.Size();
-        size_t hash = Hash(key);
-        size_t idx = hash % cap;
+        const size_t cap = m_Entries.Size();
+        const size_t mask = cap - 1;
+        const size_t hash = Hash(key);
+        size_t idx = hash & mask;
         size_t firstDeleted = size_t(-1);
 
         while (m_Entries[idx].State != SlotState::Empty)
         {
-            if (m_Entries[idx].State == SlotState::Occupied && m_Entries[idx].Key == key) { return m_Entries[idx].Value; }
-            if (m_Entries[idx].State == SlotState::Deleted && firstDeleted == size_t(-1)) { firstDeleted = idx; }
-            idx = (idx + 1) % cap;
+            if (m_Entries[idx].State == SlotState::Occupied)
+            {
+                if (m_Entries[idx].Key == key) 
+                { 
+                    return m_Entries[idx].Value; 
+                }
+            }
+            else if (firstDeleted == size_t(-1))
+            {
+                firstDeleted = idx;
+            }
+
+            idx = (idx + 1) & mask;
         }
 
-        size_t targetIdx = (firstDeleted != size_t(-1)) ? firstDeleted : idx;
-
+        const size_t targetIdx = (firstDeleted != size_t(-1)) ? firstDeleted : idx;
         auto& entry = m_Entries[targetIdx];
+
         entry.Key = key;
         entry.State = SlotState::Occupied;
         entry.Value = V{};
         m_Count++;
+
         return entry.Value;
     }
 
@@ -1020,50 +1041,63 @@ namespace Hax
     }
 
     template <TriCo K, TriCo V>
-    const HashMap<K,V>::Entry* HashMap<K,V>::GetEntry(const K& key) const
+    const typename HashMap<K,V>::Entry* HashMap<K,V>::GetEntry(const K& key) const
     {
-        if (m_Entries.Size() == 0) 
-            return nullptr;
+        const size_t cap = m_Entries.Size();
+        if (cap == 0) return nullptr;
 
-        size_t cap = m_Entries.Size();
-        size_t idx = Hash(key) % cap;
-        size_t startIdx = idx;
+        const size_t mask = cap - 1;
+        size_t idx = Hash(key) & mask;
 
-        do 
+        // В линейном пробировании Empty — это сигнал остановки.
+        // Если таблица не забита на 100%, мы всегда упремся в Empty либо найдем ключ.
+        while (m_Entries[idx].State != SlotState::Empty)
         {
-            const auto& entry = m_Entries[idx];
-            if (entry.State == SlotState::Empty) return nullptr;
-            if (entry.State == SlotState::Occupied && entry.Key == key)
-                return &entry;
-            idx = (idx + 1) % cap;
-        } while (idx != startIdx);
+            if (m_Entries[idx].State == SlotState::Occupied && m_Entries[idx].Key == key)
+            {
+                return &m_Entries[idx];
+            }
+            idx = (idx + 1) & mask;
+        }
 
         return nullptr;
+    }
+
+    inline size_t NextPowerOfTwo(size_t n) 
+    {
+        if (n <= 16) return 16;
+        return std::bit_ceil(n); // Округляет вверх до ближайшей степени 2
     }
 
     template <TriCo K, TriCo V>
     void HashMap<K, V>::Grow(size_t newCap) 
     {
         size_t oldCap = m_Entries.Size();
-        if (newCap == 0) 
-            newCap = (oldCap == 0) ? 16 : oldCap * 2;
+
+        // Гарантируем степень двойки
+        newCap = NextPowerOfTwo(newCap > 0 ? newCap : oldCap * 2);
+        size_t mask = newCap - 1; // Например: 16 - 1 = 15 (в битах: 00001111)
 
         Vector<Entry> oldEntries = std::move(m_Entries); 
         m_Entries.Resize(newCap);
         m_Count = 0;
 
+        // Инициализация новых слотов
         for (size_t i = 0; i < newCap; ++i)
             m_Entries[i].State = SlotState::Empty;
 
+        // Рехеширование
         for (size_t i = 0; i < oldCap; ++i) 
         {
             if (oldEntries[i].State == SlotState::Occupied) 
             {
-                size_t idx = Hash(oldEntries[i].Key) % newCap;
-                while (m_Entries[idx].State != SlotState::Empty) 
-                    idx = (idx + 1) % newCap;
+                size_t hash = Hash(oldEntries[i].Key);
+                size_t idx = hash & mask; // Мгновенная замена %
 
-                m_Entries[idx] = oldEntries[i];
+                while (m_Entries[idx].State != SlotState::Empty) 
+                    idx = (idx + 1) & mask; // Мгновенная замена %
+
+                m_Entries[idx] = std::move(oldEntries[i]);
                 m_Count++;
             }
         }

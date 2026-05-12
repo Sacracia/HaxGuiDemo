@@ -1,11 +1,8 @@
-
 #include "hax_gui.h"
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
-
-#include "resource.h"
 
 extern const Hax::uint8 Inter_Regular[65824];
 extern const Hax::uint8 Inter_Medium[67404];
@@ -120,6 +117,7 @@ namespace Hax::Gui
         bool CloseBtn : 1 = false;
         bool CrossBtn : 1 = false;
         bool ClickClose : 1 = false;
+        bool EscClose : 1 = false;
         float Width = 500_px;
     };
 
@@ -170,7 +168,7 @@ namespace Hax::Gui
     static void EndPageSection();
     static bool PageSectionAnchor(WStringView text);
     static bool Swap(FontHandle font, WStringView text1, WStringView text2, float fontH, bool first, bool rotate = false);
-    static void Image(Texture2D img, float size, float r, Presence presence = Presence::Off);
+    static void Image(TextureHandle img, float size, float r, Presence presence = Presence::Off);
     static void Badge(WStringView text, const BadgeParams& params = {});
     static bool Collapse(size_t id, CollapseType type = CollapseType::Focus, CollapseIcon icon = CollapseIcon::None);
     static float CalcKbdHeight(float rem = 0.875f, float heightMult = 6.f);
@@ -212,8 +210,8 @@ namespace Hax::Gui
     static void FieldsetPage();
 
     static FontHandle g_IconsRegular, g_InterMedium, g_InterSemibold, g_IconsSolid, g_InterRegular;
-    static Texture2D g_SectionBg, g_FlowersImg, g_BluredFlowersImg, g_GithubLogo;
-    static Texture2D g_BadPerson, g_SuperPerson, g_YellingWoman, g_YellingCat, g_Gordon, g_IdiotSandwich;
+    static TextureHandle g_SectionBg, g_FlowersImg, g_BluredFlowersImg, g_GithubLogo;
+    static TextureHandle g_BadPerson, g_SuperPerson, g_YellingWoman, g_YellingCat, g_Gordon, g_IdiotSandwich;
 
     constexpr ScrollStyle NavMenuScroll = { .TrackWidth = 8.f, .ThumbPadding = 1.f, .TrackCol = 0xF3F4F6FF, .ThumbCol = 0xD1D5DCFF, .ThumbHovCol = 0xD1D5DCFF, .ThumbActiveCol = 0xD1D5DCFF };
     constexpr ScrollStyle NavMenuScroll2 = { .TrackWidth = 8.f, .ThumbPadding = 1.f, .TrackCol = 0xFFFFFFFF, .ThumbCol = 0xD1D5DCFF, .ThumbHovCol = 0xD1D5DCFF, .ThumbActiveCol = 0xD1D5DCFF };
@@ -225,29 +223,6 @@ namespace Hax::Gui
         {
             s_Inited = true;
 
-            {
-                IniFile s_IniFile{L"hax_demo.ini"};
-                int s_VarInt = 3;
-                float s_VarFloat = 33.f;
-                bool s_VarBool = false;
-                Vector2 s_VarVec2 = { 98.f, 57.f };
-
-                IniAddEntry(s_IniFile, "Section1", "VarInt", &s_VarInt, IniFileWrite_Int, IniFileRead_Int);
-                IniAddEntry(s_IniFile, "Section1", "VarFloat", &s_VarFloat, IniFileWrite_Float, IniFileRead_Float);
-                IniAddEntry(s_IniFile, "Section2", "VarBool", &s_VarBool, IniFileWrite_Bool, IniFileRead_Bool);
-                IniAddEntry(s_IniFile, "Section2", "VarVector2", &s_VarVec2, IniFileWrite_Vector2, IniFileRead_Vector2);
-                IniLoad(s_IniFile);
-                printf("s_VarInt = %d\n", s_VarInt);
-                printf("s_VarFloat = %f\n", s_VarFloat);
-                printf("s_VarBool = %d\n", s_VarBool);
-                printf("s_VarVec2 = %f,%f\n", s_VarVec2.X, s_VarVec2.Y);
-
-                s_VarInt = 3;
-                s_VarFloat = 33.f;
-                s_VarBool = false;
-                s_VarVec2 = { 98.f, 57.f };
-                IniSave(s_IniFile);
-            }
             Gui::CreateLayer(L"Modal", 100);
 
             g_InterRegular = Gui::LoadFont(Inter_Regular);
@@ -347,7 +322,7 @@ namespace Hax::Gui
         EndVertical();
         EndContainer();
 
-        size_t hash = Hash(s_SelectedNavItem);
+        size_t hash = Hash(&s_SelectedNavItem, 4);
         BeginContainer(hash, {.H = -20_px, .Clip = true, .ScrollY = true, .ScrollVisible = true, .Style = NavMenuScroll2});
         BeginHorizontal();
         Space(40_px);
@@ -493,7 +468,7 @@ namespace Hax::Gui
 
     static void Label(FontHandle hFont, WStringView text, const Color& color, float fontH, bool alignH)
     {
-        const Vector2 size = CalcTextSize(hFont, text, fontH, 1.1f);
+        const Vector2 size = CalcTextSize(hFont, text, fontH, 1.0f);
 
         const float layoutHeight = Max(GetLayoutBounds().GetSize().Y, size.Y);
         const Vector2 extraSize = {0.f, alignH ? (layoutHeight - size.Y) / 2.f : 0.f};
@@ -508,7 +483,7 @@ namespace Hax::Gui
     static bool NavMenuBtn(WStringView text, bool selected, size_t id)
     {
         const float fontH = 13_px;
-        const float spacing = 1.1f;
+        const float spacing = 1.0f;
         const Vector2 textSize = CalcTextSize(g_InterRegular, text, fontH, spacing);
 
         const Vector2 padding = {20_px, 5_px};
@@ -580,7 +555,8 @@ namespace Hax::Gui
             Rect bounds = Rect::FromPosSize(GetCursorPos(), state.ContainerSize);
             if (IsItemVisible(bounds))
             {
-                float uvY = (std::min)(bounds.GetSize().Y / g_SectionBg.Height, 1.f);
+                Vector2 imgSize = GetImageSize(g_SectionBg);
+                float uvY = Hax::Min(bounds.GetSize().Y / imgSize.Y, 1.f);
                 DrawImage(g_SectionBg, bounds.Min, bounds.Max, {.UVmax = {1.f, uvY}});
                 DrawRect(bounds.Min, bounds.Max, {.BorderColor = 0xE8E8E8FF, .BorderTh = 0.5_px, .FillColor = 0xE8E8E800, .Rounding = 10_px});
             }
@@ -656,7 +632,7 @@ namespace Hax::Gui
 
         DrawRect(btnBounds.Min, btnBounds.Max, {.BorderColor = 0xE8E8E8FF, .BorderTh = 0.5_px, .FillColor = btnColor, .Rounding = 5_px});
         DrawString(g_InterRegular, L"#", btnBounds.Min + padding, dp13, {.Color = fgColor});
-        DrawString(g_InterSemibold, text, textPos, dp16, {.Spacing = 1.1f});
+        DrawString(g_InterSemibold, text, textPos, dp16, {.Spacing = 1.0f});
 
         if (hovered) SetMouseIcon(MouseIcon_Hand);
         return IsItemClicked(id);
@@ -700,7 +676,7 @@ namespace Hax::Gui
         return IsItemClicked(id);
     }
 
-    static void Image(Texture2D img, float size, float r, Presence presence)
+    static void Image(TextureHandle img, float size, float r, Presence presence)
     {
         const Vector2 size2 = {size, size};
         const Rect bounds = Rect::FromPosSize(GetCursorPos(), size2);
@@ -879,7 +855,7 @@ namespace Hax::Gui
             }
 
             DrawRect(bounds.Min, bounds.Max, {.BorderColor = 0xCBCBCBFF, .BorderTh = 0.5_px, .FillColor = 0xf8f8f8ff, .Rounding = 3_px});
-            DrawString(g_InterRegular, keyName, bounds.Min + padding, fontH, {.Spacing = 1.08f});
+            DrawString(g_InterRegular, keyName, bounds.Min + padding, fontH, {.Spacing = 1.00f});
         }
     }
 
@@ -1033,6 +1009,9 @@ namespace Hax::Gui
         ModalState& state = GetState<ModalState>(id);
         if (!state.Opened && state.Anim.Progress == 0.f)
             return false;
+
+        if (params.EscClose && IsKeyJustDown(VK_ESCAPE))
+            state.Opened = false;
 
         SwitchLayer(L"Modal");
 
@@ -1194,7 +1173,7 @@ namespace Hax::Gui
 
     static bool HyperLink(size_t id, WStringView text, bool on, const ButtonTheme& theme)
     {
-        Vector2 textSize = CalcTextSize(g_InterRegular, text, 14_px, 1.1f);
+        Vector2 textSize = CalcTextSize(g_InterRegular, text, 14_px);
         const Rect bounds = Rect::FromPosSize(GetCursorPos(), textSize);
 
         PlaceItem(textSize);
@@ -1210,7 +1189,7 @@ namespace Hax::Gui
                 col = col.Darken(0.3f);
             }
 
-            DrawString(g_InterRegular, text, bounds.Min, 14_px, {.Color = col.ToColor(), .Spacing = 1.1f});
+            DrawString(g_InterRegular, text, bounds.Min, 14_px, {.Color = col.ToColor()});
 
             if (hovered || on)
                 DrawLine(bounds.GetBL(), bounds.Max, {.FillColor = col.ToColor(), .Th = 1_px});
@@ -1296,7 +1275,7 @@ namespace Hax::Gui
 
         if (!params.Text.Empty())
         {
-            DrawString(g_InterRegular, params.Text, bounds.Min + textOffset, fontH, {.Color = style.Fg.ToColor(), .Spacing = 1.1f});
+            DrawString(g_InterRegular, params.Text, bounds.Min + textOffset, fontH, {.Color = style.Fg.ToColor(), .Spacing = 1.0f});
         }
 
         return clicked;
@@ -1438,11 +1417,13 @@ namespace Hax::Gui
                 Rect bounds = GetContainerBounds();
                 Vector2 size = bounds.GetSize();
 
-                DrawImage(g_BluredFlowersImg, bounds.Min, bounds.Max, {.R = 10_px, .UVmax = {1.f, size.Y / g_BluredFlowersImg.Height}});
+                Vector2 imgSize = GetImageSize(g_BluredFlowersImg);
+                DrawImage(g_BluredFlowersImg, bounds.Min, bounds.Max, {.R = 10_px, .UVmax = {1.f, Min(1.f, size.Y / imgSize.Y)}});
 
                 DifGoUp();
 
-                DrawImage(g_FlowersImg, bounds.Min, bounds.Max, {.R = 10_px, .UVmax = {1.f, size.Y / g_FlowersImg.Height}});
+                imgSize = GetImageSize(g_FlowersImg);
+                DrawImage(g_FlowersImg, bounds.Min, bounds.Max, {.R = 10_px, .UVmax = {1.f, Min(1.f, size.Y / imgSize.Y)}});
 
                 EndDifView();
             }
@@ -1498,10 +1479,10 @@ namespace Hax::Gui
         if (Button(L"Open modal", {.Id = HAX_LINE})) OpenModal(L"Modal4");
         EndPageSection();
 
-        ShowModal(L"Modal1", L"Press ESC key or click the button below to close", {.CloseBtn = true}); //!
-        ShowModal(L"Modal2", L"Press ESC key or click outside to close", {.ClickClose = true}); //!
-        ShowModal(L"Modal3", L"Press ESC key or click on X button to close", {.CrossBtn = true}); //!
-        ShowModal(L"Modal4", L"Click the button below to close", {.CloseBtn = true, .Width = 1000_px}); //!
+        ShowModal(L"Modal1", L"Press ESC key or click the button below to close", {.CloseBtn = true, .EscClose = true});
+        ShowModal(L"Modal2", L"Press ESC key or click outside to close", {.ClickClose = true, .EscClose = true});
+        ShowModal(L"Modal3", L"Press ESC key or click on X button to close", {.CrossBtn = true, .EscClose = true});
+        ShowModal(L"Modal4", L"Click the button below to close", {.CloseBtn = true, .Width = 1000_px});
     }
 
     static void SwapPage()
@@ -1825,7 +1806,7 @@ namespace Hax::Gui
         Space(55_px);
 
         BeginPageSection(L"Breadcrumbs with max-width");
-        BeginContainer(HAX_LINE, {.W = 320_px, .H = 30_px, .ScrollX = true, .Style = NavMenuScroll});
+        BeginContainer(HAX_LINE, {.W = 320_px, .H = 30_px, .Clip = true, .ScrollX = true, .Style = NavMenuScroll});
         BeginBreadCrumbs();
         BreadCrumb(HAX_LINE, {}, L"Long text 1", false);
         BreadCrumb(HAX_LINE, {}, L"Long text 2", false);
@@ -1992,7 +1973,7 @@ namespace Hax::Gui
     }
 }
 
-#pragma region Файлы
+#pragma region Files
 
 const Hax::uint8 Inter_Regular[65824]  = {
     0x77, 0x4f, 0x46, 0x32, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x01, 0x20, 0x00, 0x11, 0x00, 0x00, 

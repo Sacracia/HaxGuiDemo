@@ -14,54 +14,6 @@
 
 using Microsoft::WRL::ComPtr;
 
-//size_t g_TotalAllocated, g_MaxAllocated;
-
-//void* operator new(size_t size)
-//{
-//    g_TotalAllocated += size;
-//    g_MaxAllocated = std::max(g_MaxAllocated, g_TotalAllocated);
-//
-//    void* ptr = std::malloc(size);
-//    if (!ptr) 
-//        throw std::bad_alloc();
-//    return ptr;
-//}
-//
-//void operator delete(void* ptr, size_t size) noexcept 
-//{
-//    g_TotalAllocated -= size;
-//    std::free(ptr);
-//}
-//
-//void operator delete(void* ptr) noexcept 
-//{
-//    printf("Dealloc: ?. Left %zu\n", g_TotalAllocated);
-//    std::free(ptr);
-//}
-
-//void* operator new[](size_t size)
-//{
-//    g_TotalAllocated += size;
-//    g_MaxAllocated = std::max(g_MaxAllocated, g_TotalAllocated);
-//
-//    void* ptr = std::malloc(size);
-//    if (!ptr) 
-//        throw std::bad_alloc();
-//    return ptr;
-//}
-//
-//void operator delete[](void* ptr) noexcept
-//{
-//    printf("Dealloc: ?. Left %zu\n", g_TotalAllocated);
-//    std::free(ptr);
-//}
-//
-//void operator delete[](void* ptr, size_t size) noexcept
-//{
-//    g_TotalAllocated -= size;
-//    std::free(ptr);
-//}
-
 namespace Hax::Gui
 {
     Allocator g_StateAlloc;
@@ -95,15 +47,20 @@ namespace Hax::Gui
     {
         HashMap<uint32, MsdfGlyph*> Glyphs;
 
-        float Size;
-        float DistanceRange;
-        float EmSize;
-        float Ascender, Descender;
-        float LineHeight;
+        float                   Size;
+        float                   DistanceRange;
+        float                   EmSize;
+        float                   Ascender;
+        float                   Descender;
+        float                   LineHeight;
 
-        float AtlasIndex;
-        Span<const uint8> RawAtlas;
-        uint32 RawWidth, RawHeight;
+        struct
+        {
+            Span<const uint8>   Data;
+            float               IndexInArray;
+            uint32              Width;
+            uint32              Height;
+        } Atlas;
     };
 
     struct Glyph
@@ -134,8 +91,8 @@ namespace Hax::Gui
 
         MsdfFont* Decode();
 
-        void ReadBytes(uint8* target, uint64 nBytes);
-        void ReadString(String* str, uint64 nBytes);
+        void ReadBytes(uint8* target, size_t nBytes);
+        void ReadString(String* str, size_t nBytes);
         void AlignCursor();
 
     private:
@@ -188,7 +145,7 @@ namespace Hax::Gui
     static Glyph& FindOrLoadGlyph(Font& font, char16 sym, float sz);
     static Glyph& FindOrLoadGlyph(Font& font, char16 sym, uint32 sz);
     static float GetKerning(Font& font, char16 sym1, char16 sym2);
-    void MsdfFontDecoder::ReadBytes(uint8* target, uint64 nBytes)
+    void MsdfFontDecoder::ReadBytes(uint8* target, size_t nBytes)
     {
         HAX_ASSERT(m_ReadCursor + nBytes <= m_Binary + m_BinarySize);
 
@@ -204,12 +161,12 @@ namespace Hax::Gui
 
     void MsdfFontDecoder::AlignCursor()
     {
-        uint64 nBytesRead = m_ReadCursor - m_Binary;
+        size_t nBytesRead = m_ReadCursor - m_Binary;
         if (nBytesRead % 4 > 0)
             this->ReadBytes(nullptr, 4 - nBytesRead % 4);
     }
 
-    void MsdfFontDecoder::ReadString(String* str, uint64 nChars)
+    void MsdfFontDecoder::ReadString(String* str, size_t nChars)
     {
         if (nChars > 0)
         {
@@ -449,10 +406,9 @@ namespace Hax::Gui
             HAX_ASSERT(header.imageType == IMAGE_MSDF);
 
             this->ReadString(nullptr, header.metadataLength);
-            font->RawAtlas = Span(m_ReadCursor, header.dataLength);
-            font->RawHeight = header.height;
-            font->RawWidth = header.width;
-            //font->Atlas = LoadImageFromMemory(Span(m_ReadCursor, header.dataLength));
+            font->Atlas.Data = Span(m_ReadCursor, header.dataLength);
+            font->Atlas.Height = header.height;
+            font->Atlas.Width = header.width;
 
             this->ReadBytes(nullptr, header.dataLength);
             this->AlignCursor();
@@ -510,7 +466,7 @@ namespace Hax::Gui
 
             timer.FramerateSecPerFrameAccum += timer.DeltaTime - timer.FramerateSecPerFrame[timer.FramerateSecPerFrameIdx];
             timer.FramerateSecPerFrame[timer.FramerateSecPerFrameIdx] = timer.DeltaTime;
-            timer.FramerateSecPerFrameCount = std::max(timer.FramerateSecPerFrameCount, ++timer.FramerateSecPerFrameIdx);
+            timer.FramerateSecPerFrameCount = Max(timer.FramerateSecPerFrameCount, ++timer.FramerateSecPerFrameIdx);
             timer.FramerateSecPerFrameIdx %= (int)_countof(timer.FramerateSecPerFrame);
         }
 
@@ -521,7 +477,8 @@ namespace Hax::Gui
             mouse.PrevIcon = mouse.Icon;
             mouse.Icon = MouseIcon_Arrow;
             mouse.PrevDownDuration = mouse.DownDuration;
-            if (mouse.DownDuration >= 0.f) mouse.DownDuration += g_Context->Timer.DeltaTime;
+            if (mouse.DownDuration >= 0.f) 
+                mouse.DownDuration += g_Context->Timer.DeltaTime;
         }
 
         {
@@ -569,22 +526,24 @@ namespace Hax::Gui
 
         UpdateKeyboardInputs();
 
-        Timer& timer = g_Context->Timer;
-        G.Time = timer.Time;
-        G.DeltaTime = timer.DeltaTime;
-        G.Framerate = timer.FramerateSecPerFrameCount / timer.FramerateSecPerFrameAccum;
+        {
+            Timer& timer = g_Context->Timer;
+            G.Time = timer.Time;
+            G.DeltaTime = timer.DeltaTime;
+            G.Framerate = timer.FramerateSecPerFrameCount / timer.FramerateSecPerFrameAccum;
 
-        Interaction& inter = g_Context->Interaction;
-        G.ActiveItemId = inter.ThisFrame.ActiveItemId;
-        G.HoveredItemId = inter.ThisFrame.HoveredItem.Id;
-        G.ClickedItemId = inter.ClickedItemId;
-        G.FocusedItemId = inter.FocusedItemId;
+            Interaction& inter = g_Context->Interaction;
+            G.ActiveItemId = inter.ThisFrame.ActiveItemId;
+            G.HoveredItemId = inter.ThisFrame.HoveredItem.Id;
+            G.ClickedItemId = inter.ClickedItemId;
+            G.FocusedItemId = inter.FocusedItemId;
 
-        G.MousePos = g_Context->Mouse.Pos;
-        G.MouseDeltaPos = g_Context->Mouse.DeltaPos;
+            G.MousePos = g_Context->Mouse.Pos;
+            G.MouseDeltaPos = g_Context->Mouse.DeltaPos;
 
-        G.ViewportSize = g_Context->Viewport.Size;
-        G.ScaleFactor = g_Context->Viewport.ScaleFactor;
+            G.ViewportSize = g_Context->Viewport.Size;
+            G.ScaleFactor = g_Context->Viewport.ScaleFactor;
+        }
     }
 
     void EndFrame()
@@ -599,9 +558,12 @@ namespace Hax::Gui
 
         if (!g_Context->Bitmap.DirtyRect.IsInverted())
         {
-            g_Context->Backend->UpdateTextureRect(g_Context->Bitmap.Texture, g_Context->Bitmap.Pixels, g_Context->Bitmap.DirtyRect);
-            g_Context->Bitmap.DirtyRect.MinX =  g_Context->Bitmap.DirtyRect.MinY = (uint32)-1;
-            g_Context->Bitmap.DirtyRect.MaxX =  g_Context->Bitmap.DirtyRect.MaxY = 0;
+            auto& bitmap = g_Context->Bitmap;
+            uint8* src = bitmap.Pixels + kBitmapSize * bitmap.DirtyRect.MinY + bitmap.DirtyRect.MinX;
+            g_Context->Backend->UpdateTextureRegion(bitmap.Texture, bitmap.DirtyRect, src, kBitmapSize);
+
+            bitmap.DirtyRect.MinX =  bitmap.DirtyRect.MinY = (uint32)-1;
+            bitmap.DirtyRect.MaxX =  bitmap.DirtyRect.MaxY = 0;
         }
 
         std::sort(g_Context->Layers.begin(), g_Context->Layers.end(), [](Layer* l1, Layer* l2) { return l1->ZOrder < l2->ZOrder; });
@@ -612,19 +574,22 @@ namespace Hax::Gui
     {
         HAX_ASSERT(g_Context != nullptr);
 
-        Delete(g_Context->GeneralAlloc, g_Context->Backend);
-
         for (auto& p : g_Context->StatePools)                   { Delete(g_StateAlloc, p.Value); }
         for (Layer* layer : g_Context->Layers)                  { Delete(g_Context->GeneralAlloc, layer); }
         for (MsdfFont* font : g_Context->MsdfFonts)             { Delete(g_Context->FontAlloc, font); }
         for (size_t i = 0; i < g_Context->Fonts.Size(); ++i)    { UnloadFont((FontHandle)i); }
+        for (size_t i = 0; i < g_Context->Textures.Size(); ++i) { UnloadImage((TextureHandle)i); }
 
         g_Context->Layers.ClearFree();
         g_Context->LayerStack.ClearFree();
+        g_Context->Fonts.ClearFree();
         g_Context->MsdfFonts.ClearFree();
+        g_Context->Textures.ClearFree();
         g_Context->StatePools.ClearFree();
         g_Context->KeysPressedThisFrame.ClearFree();
         g_Context->CharsPressedThisFrame.ClearFree();
+
+        g_Context->Backend->DestroyTexture(g_Context->Bitmap.Texture);
         Free(g_Context->FontAlloc, g_Context->Bitmap.Pixels);
 
         g_Context->DWriteFactory->UnregisterFontFileLoader(g_Context->DWriteFontFileLoader);
@@ -634,8 +599,14 @@ namespace Hax::Gui
         if (g_Context->ShouldCoUninitialize)
             CoUninitialize();
 
-        printf("Memory leaks:\nFonts - %zu\nGeneral - %zu\nState pools - %zu\n", 
+        Delete(g_Context->GeneralAlloc, g_Context->Backend);
+
+        #ifdef _DEBUG
+        StringBuilder<> sb;
+        sb.AppendF("Memory leaks:\nFonts - %zu\nGeneral - %zu\nState pools - %zu\n", 
             g_Context->FontAlloc.TotalAllocated, g_Context->GeneralAlloc.TotalAllocated, g_StateAlloc.TotalAllocated);
+        ::OutputDebugStringA(sb.CStr());
+        #endif
 
         Delete(g_Context);
         g_Context = nullptr;
@@ -644,6 +615,12 @@ namespace Hax::Gui
     bool Initialized()
     {
         return g_Context != nullptr;
+    }
+
+    void SetLogFile(LogFile* logFile)
+    {
+        HAX_ASSERT(g_Context != nullptr);
+        g_Context->Logger = logFile;
     }
 
     void SetMouseIcon(MouseIcon icon)
@@ -685,6 +662,12 @@ namespace Hax::Gui
         return (Handle)::LoadCursorW(nullptr, winIcon);
     }
 
+    bool IsLmbReleased()
+    {
+        HAX_ASSERT(g_Context != nullptr);
+        return !g_Context->Mouse.LmbDown;
+    }
+
     bool IsLmbJustReleased()
     {
         HAX_ASSERT(g_Context != nullptr);
@@ -695,6 +678,12 @@ namespace Hax::Gui
     {
         HAX_ASSERT(g_Context != nullptr);
         return g_Context->Mouse.IsLmbJustPressed();
+    }
+
+    bool IsLmbPressed()
+    {
+        HAX_ASSERT(g_Context != nullptr);
+        return g_Context->Mouse.LmbDown;
     }
 
     void SetMouseTexture(MouseIcon icon, Handle tex)
@@ -817,7 +806,7 @@ namespace Hax::Gui
             newBatch.InstancesNum = 0;
         }
 
-        if (resources.Image != 0 && resources.Image != newBatch.Texture)
+        if (resources.Image != nullptr && resources.Image != newBatch.Texture)
         {
             newBatch.Texture = resources.Image;
             newBatch.ActionMask |= RenderBatchAction_SetTexture;
@@ -847,12 +836,7 @@ namespace Hax::Gui
         Vector2 size = { b.X - a.X, b.Y - a.Y };
 
         float scale = 1.0f;
-        auto checkSide =    [&](float r1, float r2, float sideLen) 
-                            {
-                            if (sideLen > 0.001f && (r1 + r2) > sideLen)
-                                scale = std::min(scale, sideLen / (r1 + r2));
-                            };
-
+        auto checkSide = [&](float r1, float r2, float sideLen) { if (sideLen > 0.001f && (r1 + r2) > sideLen) scale = Min(scale, sideLen / (r1 + r2)); };
         checkSide(r.X, r.Y, size.X);
         checkSide(r.W, r.Z, size.X);
         checkSide(r.X, r.W, size.Y);
@@ -866,8 +850,8 @@ namespace Hax::Gui
         item.Type = RenderItemType::Rect;
         item.Sin = currentLayer.CurrentRotation.Sin;
         item.Cos = currentLayer.CurrentRotation.Cos;
-        item.Rect.Min = Vector2(Round(a.X), Round(a.Y));
-        item.Rect.Max = Vector2(Round(b.X), Round(b.Y));
+        item.Rect.Min = a;
+        item.Rect.Max = b;
         item.Rect.R = r;
         item.Rect.BorderTh = params.BorderTh;
 
@@ -922,12 +906,17 @@ namespace Hax::Gui
         AddRenderItemToLayer(currentLayer, item);
     }
 
-    void DrawLine(const Vector2& a, const Vector2& b, const LineParams& params)
+    void DrawLine(Vector2 a, Vector2 b, const LineParams& params)
     {
         Layer& currentLayer = GetCurrentLayer();
 
         if (params.Th <= 0.f || IsDrawingSkipped())
             return;
+
+        a.X = Floor(a.X) + 0.5f;
+        a.Y = Floor(a.Y) + 0.5f;
+        b.X = Floor(b.X) + 0.5f;
+        b.Y = Floor(b.Y) + 0.5f;
 
         RenderItem item{};
         item.Type = RenderItemType::Line;
@@ -941,11 +930,13 @@ namespace Hax::Gui
         AddRenderItemToLayer(currentLayer, item);
     }
 
-    void DrawImage(Texture2D image, const Vector2& a, const Vector2& b, const ImageParams& params)
+    void DrawImage(TextureHandle hImage, const Vector2& a, const Vector2& b, const ImageParams& params)
     {
         Layer& currentLayer = GetCurrentLayer();
 
-        if (image.Srv == 0 || a.X >= b.X || a.Y >= b.Y || IsDrawingSkipped())
+        Texture2D image = g_Context->Textures[(size_t)hImage];
+
+        if (image.View == nullptr || a.X >= b.X || a.Y >= b.Y || IsDrawingSkipped())
             return;
 
         RenderItem item{};
@@ -959,13 +950,13 @@ namespace Hax::Gui
         item.Image.UVmax = params.UVmax;
         item.Image.R = params.R;
 
-        AddRenderItemToLayer(currentLayer, item, {.Image = image.Srv});
+        AddRenderItemToLayer(currentLayer, item, {.Image = image.View});
     }
 
     static Vector2 AddGlyphToLayer(Layer& layer, Glyph& glyph, const Vector2& pos, float size, const GlyphParams& params)
     {
-        Vector2 tl; tl.X = Round(pos.X + glyph.OffX);
-                    tl.Y = Round(pos.Y + glyph.OffY);
+        Vector2 tl; tl.X = pos.X + glyph.OffX;
+                    tl.Y = pos.Y + glyph.OffY;
         Vector2 br; br.X = tl.X + (float)glyph.W;
                     br.Y = tl.Y + (float)glyph.H;
 
@@ -974,15 +965,15 @@ namespace Hax::Gui
         item.Sin = layer.CurrentRotation.Sin;
         item.Cos = layer.CurrentRotation.Cos;
         item.Color1 = params.Color;
-        item.Glyph.A = tl;
-        item.Glyph.B = br;
+        item.Glyph.A = Round(tl);
+        item.Glyph.B = Round(br);
         item.Glyph.UVmin = glyph.UV0;
         item.Glyph.UVmax = glyph.UV1;
 
         AddRenderItemToLayer(layer, item);
 
         Vector2 resultPos = pos;
-        resultPos.X += glyph.Advance * params.Spacing;
+        resultPos.X += Round(glyph.Advance * params.Spacing);
         return resultPos;
     }
 
@@ -1018,7 +1009,7 @@ namespace Hax::Gui
 
         Font& font = *g_Context->Fonts[(size_t)hFont];
 
-        Vector2 glyphPos = pos;
+        Vector2 glyphPos = Round(pos);
         size_t len = text.Length();
         for (size_t i = 0; i < len; ++i)
         {
@@ -1026,7 +1017,7 @@ namespace Hax::Gui
 
             if (wc == '\n')
             {
-                glyphPos = Vector2(glyphPos.X, glyphPos.Y + font.LineHeight * size);
+                glyphPos = Round(Vector2(pos.X, glyphPos.Y + font.LineHeight * size));
                 continue;
             }
 
@@ -1299,19 +1290,20 @@ namespace Hax::Gui
 
     Vector2 GetCursorPos()
     {
-        return g_Context->CurrentLayer->CurrentLayout.CursorPos;
+        return GetCurrentLayer().CurrentLayout.CursorPos;
     }
 
     void SetCursorPos(const Vector2& pos)
     {
-        Layout& layout = g_Context->CurrentLayer->CurrentLayout;
+        Layout& layout = GetCurrentLayer().CurrentLayout;
         HAX_ASSERT(layout.IsRoot() && "SetCursorPos must be used in root layers");
         layout.CursorPos = pos;
     }
 
     void VerticalLine(float th, const Color& color, float size)
     {
-        if (size <= 0.f) size = GetContentRegionAvail().Y + size;
+        if (size <= 0.f) 
+            size = GetContentRegionAvail().Y + size;
 
         Rect bounds;
         bounds.Min = GetCursorPos();
@@ -1319,12 +1311,13 @@ namespace Hax::Gui
 
         PlaceItem(bounds.GetSize());
         if (IsItemVisible(bounds))
-            DrawRect(bounds.Min, bounds.Max, { .FillColor = color });
+            DrawRect(bounds.Min, bounds.Max, {.FillColor = color});
     }
 
     void HorizontalLine(float th, const Color& color, float size)
     {
-        if (size <= 0.f) size = GetContentRegionAvail().X + size;
+        if (size <= 0.f) 
+            size = GetContentRegionAvail().X + size;
 
         Rect bounds;
         bounds.Min = GetCursorPos();
@@ -1424,7 +1417,6 @@ namespace Hax::Gui
             }
         }
 
-        // Start new layout
         currentLayer.LayoutStack.PushBack(currentLayer.CurrentLayout);
 
         Layout& currentLayout = currentLayer.CurrentLayout;
@@ -1432,7 +1424,6 @@ namespace Hax::Gui
         currentLayout.Bounds = Rect(layoutPos, layoutPos);
         currentLayout.Type = LayoutType::Container;
 
-        // Start new container
         currentLayer.ContainerStack.PushBack(currentContainer);
         currentContainer.Bounds = bounds;
         currentContainer.Id = id;
@@ -1450,7 +1441,7 @@ namespace Hax::Gui
 
     void ScrollYTo(float posY)
     {
-        uint64 id = g_Context->CurrentLayer->CurrentScrollId;
+        size_t id = g_Context->CurrentLayer->CurrentScrollId;
         if (id == kInvalidId)
             return;
 
@@ -1503,10 +1494,10 @@ namespace Hax::Gui
         {
             auto& scroll = state->Scroll;
 
-            uint64 internalId = (uint64)&scroll;
+            size_t internalId = (size_t)&scroll;
 
-            float trackWidth = std::max(3.f, state->Scroll.Style.TrackWidth * G.ScaleFactor);
-            float padding = std::max(0.f, std::min(state->Scroll.Style.ThumbPadding * G.ScaleFactor, (trackWidth - 1) / 2.f));
+            float trackWidth = Max(3.f, state->Scroll.Style.TrackWidth * G.ScaleFactor);
+            float padding = Max(0.f, Min(state->Scroll.Style.ThumbPadding * G.ScaleFactor, (trackWidth - 1) / 2.f));
             float thumbWidth = trackWidth - padding * 2.f;
 
             // ScrollY
@@ -1514,10 +1505,10 @@ namespace Hax::Gui
             {
                 if (yScrollVisible)
                 {
-                    height = std::max(height, maxHeight);
+                    height = Max(height, maxHeight);
 
                     bool firstFrameVisible = scroll.Offset.Y < 0.f;
-                    scroll.Offset.Y = std::max(0.f, std::min(scroll.Offset.Y, height - maxHeight));
+                    scroll.Offset.Y = Max(0.f, Min(scroll.Offset.Y, height - maxHeight));
 
                     Rect trackBounds;
                     trackBounds.Min = currentLayer.CurrentContainer.Bounds.GetTR();
@@ -1562,11 +1553,11 @@ namespace Hax::Gui
                         scroll.TargetOffsetY += delta;
                     }
 
-                    scroll.Offset.Y = std::min(scroll.Offset.Y, height - maxHeight);
-                    scroll.Offset.Y = std::max(scroll.Offset.Y, 0.f);
+                    scroll.Offset.Y = Min(scroll.Offset.Y, height - maxHeight);
+                    scroll.Offset.Y = Max(scroll.Offset.Y, 0.f);
 
-                    scroll.TargetOffsetY = std::max(scroll.TargetOffsetY, 0.f);
-                    scroll.TargetOffsetY = std::min(scroll.TargetOffsetY, height - maxHeight);
+                    scroll.TargetOffsetY = Max(scroll.TargetOffsetY, 0.f);
+                    scroll.TargetOffsetY = Min(scroll.TargetOffsetY, height - maxHeight);
                 }
                 else
                 {
@@ -1580,10 +1571,10 @@ namespace Hax::Gui
             {
                 if (xScrollVisible)
                 {
-                    width = std::max(width, maxWidth);
+                    width = Max(width, maxWidth);
 
                     bool firstFrameVisible = scroll.Offset.X < 0.f;
-                    scroll.Offset.X = std::max(0.f, std::min(scroll.Offset.X, width - maxWidth));
+                    scroll.Offset.X = Max(0.f, Min(scroll.Offset.X, width - maxWidth));
 
                     Rect trackBounds;
                     trackBounds.Min = currentContainer.Bounds.GetBL();
@@ -1604,7 +1595,7 @@ namespace Hax::Gui
                         Color thumbColorHeld = state->Scroll.Style.ThumbActiveCol;
                         Color thumbColorHovered = state->Scroll.Style.ThumbHovCol;
                         Color thumbColor = thumbHitTest.Active ? thumbColorHeld : thumbHitTest.Hovered ? thumbColorHovered : state->Scroll.Style.ThumbCol;
-                        DrawRect(thumbBounds.Min, thumbBounds.Max, {.FillColor = thumbColor, .Rounding = 5.f});//!Rounding
+                        DrawRect(thumbBounds.Min, thumbBounds.Max, {.FillColor = thumbColor, .Rounding = 5_px});
                     }
 
                     if (trackHitTest.Pressed && (float)g_Context->Timer.Time - scroll.LastTimeHeldX > 0.2f)
@@ -1618,8 +1609,8 @@ namespace Hax::Gui
                     if (thumbHitTest.Active)
                         scroll.Offset.X += g_Context->Mouse.DeltaPos.X / trackBounds.GetSize().X * width;
 
-                    scroll.Offset.X = std::max(scroll.Offset.X, 0.f);
-                    scroll.Offset.X = std::min(scroll.Offset.X, width - maxWidth);
+                    scroll.Offset.X = Max(scroll.Offset.X, 0.f);
+                    scroll.Offset.X = Min(scroll.Offset.X, width - maxWidth);
                 }
                 else
                     scroll.Offset.X = -1;
@@ -1657,7 +1648,7 @@ namespace Hax::Gui
         Font& font = *g_Context->Fonts[(size_t)hFont];
         size = Round(size);
 
-        Vector2 textSize = { 0.f, font.LineHeight * size };
+        Vector2 textSize = {0.f, Round(font.LineHeight * size)};
         float curLineWidth = 0.f;
 
         size_t len = text.Length();
@@ -1675,11 +1666,11 @@ namespace Hax::Gui
 
             const Glyph& glyph = FindOrLoadGlyph(font, wc, (uint32)size);
 
-            /*if (i + 1 == len)
+            if (i + 1 == len)
             {
                 curLineWidth += glyph.OffX + (float)glyph.W;
             }
-            else*/
+            else
             {
                 curLineWidth += glyph.Advance * spacing;
             }
@@ -1701,7 +1692,7 @@ namespace Hax::Gui
         {
             if (wc == '\n')
             {
-                textSize.X = std::max(textSize.X, curLineWidth);
+                textSize.X = Max(textSize.X, curLineWidth);
                 textSize.Y += font.LineHeight * size;
                 curLineWidth = 0.f;
                 continue;
@@ -1715,7 +1706,7 @@ namespace Hax::Gui
             curLineWidth += glyph->Advance.X * size * spacing;
         }
 
-        textSize.X = std::max(textSize.X, curLineWidth);
+        textSize.X = Max(textSize.X, curLineWidth);
         return textSize;
     }
 
@@ -1974,22 +1965,20 @@ namespace Hax::Gui
         IDWriteFactory2* factory2 = nullptr;
         g_Context->DWriteFactory->QueryInterface(__uuidof(IDWriteFactory2), (void**)&factory2);
 
-        // 1. Используем NATURAL_SYMMETRIC — он дает самое чистое сглаживание без "грязи"
-        // и игнорирует субпиксельные смещения ClearType.
-        factory2->CreateGlyphRunAnalysis(
+        factory2->CreateGlyphRunAnalysis
+        (
             &run,
             nullptr,
             DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC, 
-            DWRITE_MEASURING_MODE_NATURAL,        // Как в stbtt
-            DWRITE_GRID_FIT_MODE_DISABLED,        // Отключаем искажения хинтинга
-            DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE, // Честный 8-бит Grayscale
-            0.0f, 0.0f,                           // origin
+            DWRITE_MEASURING_MODE_NATURAL,
+            DWRITE_GRID_FIT_MODE_DISABLED,
+            DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE,
+            0.0f, 0.0f,
             &analysis
         );
 
         factory2->Release();
 
-        // 2. Получаем границы. В режиме GRAYSCALE ALIASED_1x1 работает корректно.
         RECT rect;
         analysis->GetAlphaTextureBounds(DWRITE_TEXTURE_ALIASED_1x1, &rect);
 
@@ -1999,7 +1988,8 @@ namespace Hax::Gui
 
         if (w > 0 && h > 0)
         {
-            if (atlas.CurX + w + 1 >= kBitmapSize) {
+            if (atlas.CurX + w + 1 >= kBitmapSize) 
+            {
                 atlas.CurX = 1;
                 atlas.CurY += atlas.LineH + 1;
                 atlas.LineH = 0;
@@ -2009,40 +1999,45 @@ namespace Hax::Gui
             uint8* alphaBuffer = (uint8*)Alloc(g_Context->FontAlloc, bufferSize);
             memset(alphaBuffer, 0, bufferSize);
 
-            // 3. Извлекаем маску. DirectWrite сам применит Grayscale сглаживание.
             analysis->CreateAlphaTexture(DWRITE_TEXTURE_ALIASED_1x1, &rect, alphaBuffer, bufferSize);
 
-            for (uint32 y = 0; y < h; ++y) {
-                for (uint32 x = 0; x < w; ++x) {
-                    atlas.Pixels[(atlas.CurY + y) * kBitmapSize + (atlas.CurX + x)] = alphaBuffer[y * w + x];
-                }
-            }
+            for (uint32 y = 0; y < h; ++y)
+                for (uint32 x = 0; x < w; ++x)
+                    atlas.Pixels[(atlas.CurY + y) * kBitmapSize + (atlas.CurX + x)] = g_Context->GammaLUT[alphaBuffer[y * w + x]];
             Free(g_Context->FontAlloc, alphaBuffer);
 
-            // Dirty Rect
             atlas.DirtyRect.MinX = Min(atlas.DirtyRect.MinX, atlas.CurX);
             atlas.DirtyRect.MinY = Min(atlas.DirtyRect.MinY, atlas.CurY);
             atlas.DirtyRect.MaxX = Max(atlas.DirtyRect.MaxX, atlas.CurX + w);
             atlas.DirtyRect.MaxY = Max(atlas.DirtyRect.MaxY, atlas.CurY + h);
         }
 
-        // 4. Метрики. 
         DWRITE_FONT_METRICS fontMetrics;
         face->GetMetrics(&fontMetrics);
         DWRITE_GLYPH_METRICS glyphMetrics;
-        face->GetDesignGlyphMetrics(&glyphIndex, 1, &glyphMetrics);
+        face->GetGdiCompatibleGlyphMetrics
+        (
+            (float)size, 
+            1.0f,
+            nullptr,
+            true,
+            &glyphIndex, 
+            1, 
+            &glyphMetrics, 
+            false
+        );
 
         float scale = (float)size / (float)fontMetrics.designUnitsPerEm;
 
         glyph.W = (int)w;
         glyph.H = (int)h;
-        glyph.Advance = (float)glyphMetrics.advanceWidth * scale;
+        glyph.Advance = Round((float)glyphMetrics.advanceWidth * scale);
         glyph.OffX = (float)rect.left;
-        glyph.OffY = (font.Ascent * (float)size) + (float)rect.top; 
+        glyph.OffY = Round((font.Ascent * (float)size)) + (float)rect.top;
 
-        // UV
-        glyph.UV0 = { (float)atlas.CurX / kBitmapSize, (float)atlas.CurY / kBitmapSize };
-        glyph.UV1 = { (float)(atlas.CurX + w) / kBitmapSize, (float)(atlas.CurY + h) / kBitmapSize };
+        float invSize = 1.0f / (float)kBitmapSize;
+        glyph.UV0 = { (atlas.CurX + 0.5f) * invSize, (atlas.CurY + 0.5f) * invSize };
+        glyph.UV1 = { (atlas.CurX + w - 0.5f) * invSize, (atlas.CurY + h - 0.5f) * invSize };
 
         atlas.CurX += w + 1;
         atlas.LineH = Max(atlas.LineH, h);
@@ -2115,20 +2110,32 @@ namespace Hax::Gui
         HAX_ASSERT(SUCCEEDED(hr));
     }
 
-    Texture2D LoadImageFromMemory(Span<const uint8> data)
+    TextureHandle LoadImageFromMemory(Span<const uint8> data)
     {
         HAX_ASSERT(g_Context != nullptr);
-        Context& ctx = *g_Context;
 
         uint32 w, h;
         Vector<uint8> pixels;
         ConvertImageToBytes(data, pixels, w, h);
-        //uint8* pixels = stbi_load_from_memory(data.Data(), (int)data.Size(), &w, &h, &nChannels, 4);
 
-        Texture2D texture = ctx.Backend->CreateTexture(pixels.Data(), w, h);
+        Texture2D texture = g_Context->Backend->CreateTexture(TextureFormat::R8G8B8A8_UNorm, pixels.Data(), w, h, 1);
+        g_Context->Textures.PushBack(texture);
 
-        //stbi_image_free(pixels);
-        return texture;
+        return (TextureHandle)(g_Context->Textures.Size() - 1);
+    }
+
+    Vector2 GetImageSize(TextureHandle hImage)
+    {
+        HAX_ASSERT(g_Context != nullptr);
+
+        Texture2D texture = g_Context->Textures[(size_t)hImage];
+        return {(float)texture.Width, (float)texture.Height};
+    }
+
+    void UnloadImage(TextureHandle hImage)
+    {
+        HAX_ASSERT(g_Context != nullptr);
+        g_Context->Backend->DestroyTexture(g_Context->Textures[(size_t)hImage]);
     }
 
     bool IsKeyDown(uint8 vk)
@@ -2205,15 +2212,6 @@ namespace Hax::Gui
 
 namespace Hax::Gui
 {
-    const LinearColor LinearColor::White(1.f,1.f,1.f);
-    const LinearColor LinearColor::Gray(0.5f,0.5f,0.5f);
-    const LinearColor LinearColor::Black(0,0,0);
-    const LinearColor LinearColor::Transparent(0,0,0,0);
-    const LinearColor LinearColor::Red(1.f,0,0);
-    const LinearColor LinearColor::Green(0,1.f,0);
-    const LinearColor LinearColor::Blue(0,0,1.f);
-    const LinearColor LinearColor::Yellow(1.f,1.f,0);
-
     LinearColor LinearColor::Brighten(float factor) const
     {
         LinearColor target{1.f, 1.f, 1.f, A};
@@ -2239,8 +2237,8 @@ namespace Hax::Gui
 
         Vector2 atlasSize = {(float)g_Context->AtlasArray.Width, (float)g_Context->AtlasArray.Height};
 
-        Vector2 uvPos1 = Vector2(glyph->ImageBounds.L, font.RawHeight - glyph->ImageBounds.T) / atlasSize;
-        Vector2 uvPos2 = Vector2(glyph->ImageBounds.R, font.RawHeight - glyph->ImageBounds.B) / atlasSize;
+        Vector2 uvPos1 = Vector2(glyph->ImageBounds.L, font.Atlas.Height - glyph->ImageBounds.T) / atlasSize;
+        Vector2 uvPos2 = Vector2(glyph->ImageBounds.R, font.Atlas.Height - glyph->ImageBounds.B) / atlasSize;
 
         float scale = size;
         Vector2 baseLine{pos.X, pos.Y + font.Ascender * size};
@@ -2251,15 +2249,15 @@ namespace Hax::Gui
         item.Type = RenderItemType::MsdfGlyph;
         item.Sin = layer.CurrentRotation.Sin;
         item.Cos = layer.CurrentRotation.Cos;
-        item.Color1 = params.Color;
+        item.Color1 = params.Col;
         item.Color2 = params.OutCol;
         item.MsdfGlyph.A = posTL;
         item.MsdfGlyph.B = posBR;
         item.MsdfGlyph.UVmin = uvPos1;
         item.MsdfGlyph.UVmax = uvPos2;
-        item.MsdfGlyph.Index = font.AtlasIndex;
+        item.MsdfGlyph.Index = font.Atlas.IndexInArray;
         item.MsdfGlyph.PxRange = font.DistanceRange;
-        item.MsdfGlyph.AtlasSize = {(float)font.RawWidth, (float)font.RawHeight};
+        item.MsdfGlyph.AtlasSize = {(float)font.Atlas.Width, (float)font.Atlas.Height};
         item.MsdfGlyph.Weight = params.Weight;
         item.MsdfGlyph.Outline = params.Outline ? 1.f : 0.f;
 
@@ -2271,6 +2269,12 @@ namespace Hax::Gui
 
 namespace Hax::Gui
 {
+    static void GenerateGammaLUT(uint8_t* table, float gamma, float contrast)
+    {
+        for (int i = 0; i < 256; ++i) 
+            table[i] = (uint8)Clamp(255.f * std::pow(((float)i / 255.f), gamma), 0.f, 255.f);
+    }
+
     static Layer* FindLayerById(size_t id)
     {
         for (Layer* layer : g_Context->Layers)
@@ -2318,6 +2322,20 @@ namespace Hax::Gui
             HRESULT res = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory5), (IUnknown**)&ctx.DWriteFactory);
             HAX_ASSERT(SUCCEEDED(res));
 
+            {
+                IDWriteRenderingParams* params = nullptr;
+                res = ctx.DWriteFactory->CreateRenderingParams(&params);
+                HAX_ASSERT(SUCCEEDED(res));
+
+                //ctx.Gamma = params->GetGamma();
+                //ctx.Contrast = params->GetEnhancedContrast();
+                ctx.Gamma = 1.2f;
+
+                GenerateGammaLUT(ctx.GammaLUT, ctx.Gamma, ctx.Contrast);
+
+                params->Release();
+            }
+
             res = ctx.DWriteFactory->CreateInMemoryFontFileLoader(&ctx.DWriteFontFileLoader);
             HAX_ASSERT(SUCCEEDED(res));
 
@@ -2329,11 +2347,6 @@ namespace Hax::Gui
 
         HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
         ctx.ShouldCoUninitialize = (hr == S_OK);
-    }
-
-    Context::~Context()
-    {
-        
     }
 
     static void InitKeyNames()
@@ -2518,7 +2531,7 @@ namespace Hax::Gui
         if (::GetMonitorInfo(handle, &mi))
         {
             int screenHeight = mi.rcMonitor.bottom - mi.rcMonitor.top;
-            viewport.ScaleFactor = screenHeight / SCALE_BASE_HEIGHT;
+            viewport.ScaleFactor = screenHeight / kScalingBaseHeight;
         }
     }
 
@@ -2568,9 +2581,6 @@ namespace Hax::Gui
         }
     }
 
-    static uint8* g_FontAtlas = nullptr;
-    static Texture2D g_FontAtlasTex;
-
     Vector<MsdfFontHandle> LoadMsdfFonts(Span<const Span<const uint8>> arfonts)
     {
         HAX_ASSERT(g_Context != nullptr);
@@ -2588,26 +2598,27 @@ namespace Hax::Gui
             MsdfFont* font = MsdfFontDecoder(arfonts[i]).Decode();
             g_Context->MsdfFonts.PushBack(font);
 
-            maxWidth = Max(maxWidth, font->RawWidth);
-            maxHeight = Max(maxHeight, font->RawHeight);
+            maxWidth = Max(maxWidth, font->Atlas.Width);
+            maxHeight = Max(maxHeight, font->Atlas.Height);
 
             MsdfFontHandle handle = (MsdfFontHandle)(g_Context->MsdfFonts.Size() - 1);
             result.PushBack(handle);
         }
 
-        Texture2DArray array = g_Context->Backend->CreateAtlasArray(maxWidth, maxHeight, (int)arfonts.Size());
+        Texture2D array = g_Context->Backend->CreateTexture(TextureFormat::R8G8B8A8_UNorm, nullptr, maxWidth, maxHeight, (int)arfonts.Size());
 
-        for (size_t i = 0; i < arfonts.Size(); ++i)
+        for (uint32 i = 0; i < arfonts.Size(); ++i)
         {
             MsdfFont* font = g_Context->MsdfFonts[i];
-            font->AtlasIndex = (float)(int)i;
+            font->Atlas.IndexInArray = (float)(int)i;
 
             uint32 w, h;
             Vector<uint8> pixels;
-            ConvertImageToBytes(font->RawAtlas, pixels, w, h);
-            HAX_ASSERT(w == font->RawWidth && h == font->RawHeight);
+            ConvertImageToBytes(font->Atlas.Data, pixels, w, h);
+            HAX_ASSERT(w == font->Atlas.Width && h == font->Atlas.Height);
 
-            g_Context->Backend->SetSubarray(array, (int)i, font->RawWidth, font->RawHeight, pixels.Data());
+            RectU region = {0, 0, w, h};
+            g_Context->Backend->UpdateTextureRegion(array, region, pixels.Data(), font->Atlas.Width * 4, i);
         }
 
         g_Context->AtlasArray = array;

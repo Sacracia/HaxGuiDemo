@@ -1,8 +1,4 @@
-//
-// pch.h
-//
-
 #pragma once
 
 #include "gtest/gtest.h"
-#include "../haxgui.h"
+#include <hax_gui.h>
